@@ -72,6 +72,17 @@ O primeiro uso pode demorar enquanto a OMM prepara o índice. Depois, ela reapro
 
 Quando habilitada, o agente pode chamar `semantic_search` se a busca comum não encontrar algo que parece estar na memória. Na linha de comando, use `omm semantic-search "sua pergunta"`; para refazer manualmente o índice, use `omm semantic-rebuild`.
 
+## Perfis da stack
+
+`COMPOSE_PROFILES` escolhe quais serviços extras a stack inicia. Os nomes disponíveis são:
+
+- vazio: só a aplicação OMM;
+- `backup`: inicia o serviço que faz cópias no Git. Também é preciso `OMM_GIT_BACKUP_ENABLED=true`;
+- `semantic`: inicia Ollama e baixa o modelo de busca. Também é preciso `OMM_SEMANTIC_ENABLED=true`;
+- `backup,semantic`: inicia os dois extras.
+
+Escreva o valor em `.env` ou nas variáveis da stack no Portainer. Se já usa `backup`, acrescente `,semantic`; não apague `backup`.
+
 ## Dados e atualizações
 
 O código da OMM e os dados ficam separados. `OMM_DATA_PATH` aponta para a pasta de dados, que contém memórias, skills e documentos. A busca é um índice reconstruível; ela não substitui esses arquivos.
