@@ -44,7 +44,28 @@ Peça ao assistente: “Sem alterar nada, confirme se vê as ferramentas da OMM 
 
 ## Ajudantes e subagentes
 
-A OMM pode descrever papéis e skills, mas não inicia outros agentes sozinha. O assistente principal precisa escolher e chamar ajudantes, e o aplicativo usado precisa oferecer essa função. Para tarefas simples, um único agente pode cuidar de tudo.
+A OMM guarda o mapa dos ajudantes; ela não os inicia. O agente principal precisa consultar o mapa e, se o aplicativo oferecer subagentes, chamar os papéis adequados por meio da função nativa desse aplicativo.
+
+Adicione este trecho ao `AGENTS.md` do projeto que usa ajudantes:
+
+```md
+## Como dividir tarefas com ajudantes da OMM
+
+No início de uma tarefa que envolva este projeto:
+
+1. Consulte `get_agent_topology` com o escopo deste projeto.
+2. Use os nomes e as regras de ativação retornados para decidir quem chamar.
+3. Abra com `get_role` somente as instruções dos ajudantes escolhidos.
+4. Abra com `get_skill` as skills compartilhadas que se aplicam.
+5. Use os subagentes nativos do aplicativo. A OMM fornece o mapa e a memória; ela não inicia sessões-filhas.
+6. Leia os resultados, resolva divergências e responda como agente principal.
+
+Não invente ajudantes que não apareçam no perfil do projeto. Se o aplicativo não oferecer subagentes, diga isso e continue na conversa principal; não afirme que chamou alguém.
+```
+
+No Codex, esse trecho orienta o agente do projeto. O Codex ainda precisa criar os subagentes usando a capacidade nativa disponível na tarefa. Para um projeto com planejador e executor, o agente principal consulta o papel do planejador primeiro, confere o plano e então passa ao executor uma tarefa delimitada. A resposta final continua sendo responsabilidade do agente principal.
+
+Para tarefas simples, a conversa principal pode trabalhar sozinha. A topologia é um guia de encaminhamento, não uma ordem para abrir todos os ajudantes em toda tarefa.
 
 ## Medir o desempenho
 
