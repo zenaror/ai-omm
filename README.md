@@ -9,6 +9,7 @@ Você precisa de Python 3.11 ou mais recente. Na pasta do projeto, instale e pre
 ```sh
 python3 -m pip install --user -e .
 omm init
+omm doctor
 ```
 
 Guarde uma nota, procure por ela e prepare um resumo para o assistente:
@@ -32,6 +33,10 @@ docker compose up -d
 Depois, configure o assistente para acessar `http://localhost:8000/mcp` e diga a ele quando consultar e atualizar a memória. Só conectar não faz o assistente usar a OMM automaticamente.
 
 Siga o guia [Como usar a OMM nos agentes](docs/USAR_OMM_NOS_AGENTES.md). Para instruções de conexão, consulte [Ligar um assistente](docs/USAR_MCP.md). Também há guias para [Podman](docs/USAR_PODMAN.md) e [o painel web](docs/PAINEL_WEB.md).
+
+Por padrão, a OMM usa busca textual local. A busca semântica é opcional: em vez de exigir as mesmas palavras, ela tenta encontrar o mesmo assunto. Na stack Docker, o perfil opcional `semantic` inicia o Ollama e baixa um modelo pequeno para essa tarefa. Veja [como ativar](docs/USAR_MCP.md#busca-semântica-procurar-pelo-assunto). Agentes podem sugerir memórias para aprovação no painel.
+
+Para medir a busca sem acessar a internet nem usar dados pessoais, rode `python3 benchmarks/retrieval_eval.py`.
 
 ## Código e dados ficam separados
 

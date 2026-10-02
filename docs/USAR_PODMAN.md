@@ -99,7 +99,7 @@ Em computadores com SELinux, o sistema pode bloquear o acesso mesmo quando as pe
 
 ## Acesso pela rede
 
-Por padrão, as portas ficam abertas apenas no mesmo computador. Para usar o MCP e o painel de outro computador, configure `OMM_BIND_ADDRESS=0.0.0.0` no `.env` e reinicie os serviços. Isso deixa as portas visíveis na rede; faça isso apenas numa rede privada e configure a proteção descrita em [PAINEL_WEB.md](PAINEL_WEB.md). O MCP por HTTP ainda não tem senha própria.
+Por padrão, as portas ficam abertas apenas no mesmo computador. Para usar o MCP e o painel de outro computador, configure `OMM_BIND_ADDRESS=0.0.0.0` no `.env` e reinicie os serviços. Isso deixa as portas visíveis na rede. Configure `OMM_MCP_TOKEN` para proteger o MCP e veja as orientações de segurança em [USAR_MCP.md](USAR_MCP.md#proteger-o-mcp-quando-usar-pela-rede) e [PAINEL_WEB.md](PAINEL_WEB.md).
 
 ## Referências
 

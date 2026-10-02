@@ -18,7 +18,7 @@
 
 **Por quê:** arquivos Git são fáceis de revisar, copiar, fazer backup e levar para outra máquina. Um índice rápido não deve ser a única cópia de uma decisão ou evidência.
 
-**Busca atual:** busca textual FTS5 com classificação por relevância. Termos da consulta podem encontrar registros que correspondam a parte dela. A busca semântica continua sendo uma extensão opcional futura, não uma dependência para instalar ou operar a OMM.
+**Busca atual:** busca textual FTS5 com classificação por relevância. A busca por significado é opcional; no Compose, o perfil `semantic` inicia Ollama em um serviço separado e baixa o modelo para um volume persistente. Continua desligada por padrão. Seus vetores ficam no índice descartável e podem ser refeitos dos arquivos canônicos. A porta do Ollama fica apenas na rede interna da stack.
 
 ## Código atualizável e memória local separada
 
@@ -46,4 +46,26 @@
 
 **Concorrência local:** operações da memória, sincronização e backup agendado usam um bloqueio de arquivo compartilhado na pasta de dados. Isso evita que dois processos locais alterem ou façam commit dos mesmos arquivos ao mesmo tempo. Não transforma instâncias em máquinas diferentes em um sistema de escrita distribuída; continue sincronizando pelo Git.
 
-**Acesso web:** o painel aceita senha HTTP Basic configurável. O endpoint MCP por HTTP ainda não autentica pedidos por conta própria; acesso remoto ao MCP e ao painel deve passar por um proxy reverso com autenticação e HTTPS.
+**Acesso web:** o painel aceita senha HTTP Basic configurável. O MCP aceita um token estático opcional em `OMM_MCP_TOKEN`; quando preenchido, cada chamada HTTP precisa enviar `Authorization: Bearer ...`. O token permite ler e alterar a memória, então deve ser longo e guardado fora do Git. Em rede pública, use HTTPS ou VPN. A conexão `stdio` continua protegida pelo próprio computador e não usa esse token.
+
+## Contexto curto e busca sob demanda
+
+**Decisão:** o `context` MCP tem um limite de tamanho e não anexa documentos-fonte por padrão. Resultados de busca mostram trechos curtos; ferramentas separadas abrem a anotação, o papel ou a fonte inteira quando necessário.
+
+**Por quê:** assim, perguntas pequenas não carregam documentos e papéis inteiros para dentro da conversa. A pessoa ou o agente pode pedir mais quando isso fizer diferença.
+
+**Proteção e manutenção:** fontes e memórias recuperadas são dados, nunca comandos. Antes de guardar uma informação, o agente procura duplicatas; quando uma decisão muda, a nova versão é registrada e a antiga marcada como substituída.
+
+**Busca substituível:** a OMM separa a busca dos arquivos canônicos. SQLite/FTS5 vem pronto e não precisa de outro serviço. Se a pessoa habilitar, a busca semântica usa um serviço compatível com embeddings do Ollama. Nenhuma busca muda o formato das memórias.
+
+**Revisão antes de guardar:** agentes podem propor novas anotações; a pessoa aprova ou recusa no painel. A lista de possíveis semelhantes usa palavras como pista, não decide sozinha se há conflito. O arquivo `memory/proposals.jsonl` é dado canônico e segue no backup Git.
+
+**Avaliação de busca:** manter um pequeno conjunto sintético, sem dados pessoais, para medir se buscas de exemplo encontram as memórias e fontes esperadas e quanto texto o contexto prepara. Isso ajuda a perceber regressões sem usar serviços externos.
+
+## Índice derivado e atualização rápida
+
+**Decisão:** guardar no índice uma marca das versões dos arquivos pesquisáveis. Ao iniciar, a OMM só reconstrói o índice quando as memórias ou documentos Markdown mudaram; `rebuild` continua disponível para refazê-lo manualmente.
+
+**Por quê:** o primeiro início cria a busca; os próximos não precisam reler tudo se os arquivos continuam iguais. O Git e os arquivos canônicos seguem como fonte principal.
+
+**Recuperação:** se o arquivo SQLite sumir, estiver incompleto ou não abrir, ele é recriado dos arquivos canônicos. Consultas e novas anotações também têm limites para evitar respostas ou registros gigantes.

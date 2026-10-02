@@ -34,6 +34,12 @@
     <p id="health" class="small-note" role="status">Verificando estado da busca e do backup…</p>
     <p class="small-note">“Sincronizar backup” salva suas alterações, busca as novidades do Git e envia o resultado. Se houver conflito, uma cópia local fica guardada em <code>memory/imports/sync-recovery</code>.</p>
 
+    <section id="proposals-panel" class="panel hidden" aria-live="polite">
+      <div class="section-heading"><div><p class="eyebrow">REVISÃO</p><h2 id="proposals-title">Sugestões de memória</h2><p>Confira o conteúdo e possíveis anotações parecidas antes de aprovar.</p></div></div>
+      <div id="proposals" class="proposal-list"></div>
+      <p id="proposal-limit" class="small-note hidden">Mostrando até 20 sugestões. Revise estas antes de carregar mais.</p>
+    </section>
+
     <section class="panel">
       <div class="section-heading"><div><p class="eyebrow">MEMÓRIA</p><h2>Anotações dos projetos</h2><p>Busque por assunto e confira a fonte antes de usar uma informação.</p></div></div>
       <div class="filters">
@@ -43,6 +49,11 @@
       </div>
       <div id="records" class="record-list" aria-live="polite"></div>
       <p id="record-limit" class="small-note hidden">Mostrando até 200 anotações. Use a busca para encontrar outras.</p>
+      <details id="context-panel" class="context-preview hidden">
+        <summary>Prévia do contexto que a OMM prepararia <span id="context-estimate"></span></summary>
+        <p class="small-note">Estimativa aproximada: cada modelo conta tokens de um jeito. Fontes completas ficam de fora e só são abertas quando necessárias.</p>
+        <pre id="context-text"></pre>
+      </details>
     </section>
 
     <section id="sources-panel" class="panel hidden" aria-live="polite">

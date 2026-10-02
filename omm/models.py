@@ -42,10 +42,15 @@ class MemoryRecord:
         if self.status not in STATUSES:
             raise ValueError(f"status must be one of: {', '.join(sorted(STATUSES))}")
         for name in ("title", "content", "source"):
-            if not getattr(self, name).strip():
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} cannot be empty")
-        if not self.scope.strip() or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./" for c in self.scope):
+        if not isinstance(self.scope, str) or not self.scope.strip() or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./" for c in self.scope):
             raise ValueError("scope may contain only letters, numbers, dots, slashes, hyphens, and underscores")
+        if not isinstance(self.evidence, list) or any(not isinstance(item, str) for item in self.evidence):
+            raise ValueError("evidence must be a list of text references")
+        if not isinstance(self.tags, list) or any(not isinstance(item, str) for item in self.tags):
+            raise ValueError("tags must be a list of text labels")
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, sort_keys=True)

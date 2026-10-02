@@ -31,11 +31,13 @@ def _is_pristine_root(destination: Path) -> bool:
     """Allow replacing only OMM's untouched startup skeleton, preserving its index volume."""
     if not destination.exists():
         return True
-    if not destination.is_dir() or (set(p.name for p in destination.iterdir()) - {".omm", "memory", "skills", "sources"}):
+    if not destination.is_dir() or (set(p.name for p in destination.iterdir()) -
+                                    {".omm", ".omm-write.lock", "memory", "skills", "sources"}):
         return False
     memory = destination / "memory"
     if memory.exists():
-        expected = {"records.jsonl", "policies.jsonl", "handoffs.jsonl", "workstreams.jsonl", "state.json"}
+        expected = {"records.jsonl", "policies.jsonl", "handoffs.jsonl", "workstreams.jsonl",
+                    "proposals.jsonl", "state.json"}
         files = {p.relative_to(memory).as_posix() for p in memory.rglob("*") if p.is_file()}
         if files != expected:
             return False
@@ -126,8 +128,18 @@ def _update_existing_checkout(destination: Path, branch: str, username: str, tok
                             capture_output=True, text=True, check=False)
     if status.returncode:
         return "sincronização não verificada", 0
-    dirty = [line for line in status.stdout.splitlines()
-             if not (line[3:] == ".omm" or line[3:].startswith(".omm/"))]
+    dirty = []
+    for line in status.stdout.splitlines():
+        path = line[3:]
+        if path in {".omm", ".omm-write.lock"} or path.startswith(".omm/"):
+            continue
+        # Older data backups predate the review inbox. Its newly-created empty
+        # file is application scaffolding, so it must not block first upgrade.
+        if path == "memory/proposals.jsonl":
+            proposal_path = destination / path
+            if proposal_path.is_file() and proposal_path.stat().st_size == 0:
+                continue
+        dirty.append(line)
     if dirty:
         return "alterações locais preservadas", 0
 

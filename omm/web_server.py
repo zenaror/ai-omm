@@ -7,6 +7,7 @@ import binascii
 from datetime import datetime
 import hmac
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -32,14 +33,15 @@ def _json_lines(path: Path) -> list[dict]:
 def _skills(root: Path) -> list[dict]:
     result = []
     for path in sorted((root / "skills").glob("*/SKILL.md")):
-        content = path.read_text(encoding="utf-8")
+        with path.open(encoding="utf-8") as stream:
+            content = stream.read(8192)
         name = re.search(r"^name:\s*(.+)$", content, re.MULTILINE)
         description = re.search(r"^description:\s*(.+)$", content, re.MULTILINE)
         scope = re.search(r"^\s+scope:\s*(.+)$", content, re.MULTILINE)
         result.append({
             "name": name.group(1).strip() if name else path.parent.name,
             "scope": scope.group(1).strip().strip("\"'") if scope else "não definido",
-            "description": description.group(1).strip() if description else "",
+            "description": description.group(1).strip()[:240] if description else "",
             "source": path.relative_to(root).as_posix(),
         })
     return result
@@ -48,20 +50,33 @@ def _skills(root: Path) -> list[dict]:
 def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bool = False) -> dict:
     """Return canonical data for the screen; SQLite is used only to find active notes."""
     with omm.operation_lock():
-        all_records = list(omm.store.records())
+        all_records = omm.records()
         active = [r for r in all_records if r.status == "active"]
         removed = [r for r in all_records if r.status != "active"]
+        context_preview = None
         source_root = omm.root / "sources"
         source_scopes = {p.name for p in source_root.iterdir() if p.is_dir()} if source_root.exists() else set()
         scopes = sorted({r.scope for r in all_records} | source_scopes | {"global"})
         source_hits = []
         if query.strip():
-            matched_ids = {r.id for r in omm.search(query, 200, scopes=[scope] if scope else None)}
+            matched_ids = {r.id for r in omm.search(query, 100, scopes=[scope] if scope else None)}
             source_hits = [
                 {"id": hit.id, "scope": hit.scope, "heading": hit.heading,
-                 "content": hit.content, "source": hit.source}
+                 "content": hit.content[:1000], "truncated": len(hit.content) > 1000,
+                 "source": hit.source}
                 for hit in omm.search_sources(query, 8, scopes=[scope] if scope else None)
             ]
+            context_scopes = [scope] if scope else ["global"]
+            if scope and scope != "global":
+                context_scopes.insert(0, "global")
+            context_text = omm.context(query, 5, scopes=context_scopes,
+                                       state_scope=scope or "global", include_sources=False,
+                                       budget_chars=5000)
+            context_preview = {
+                "content": context_text,
+                "characters": len(context_text),
+                "estimated_tokens": math.ceil(len(context_text) / 4),
+            }
             if show_archived:
                 needle = query.casefold()
                 archived_matches = {r.id for r in removed if needle in (r.title + " " + r.content + " " + r.source).casefold()}
@@ -154,7 +169,12 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
         policies = _json_lines(omm.store.policies_path)
         handoffs = _json_lines(omm.store.handoffs_path)
         scoped_handoffs = [h for h in handoffs if not scope or h.get("scope", "default") == scope]
+        pending_proposals = omm.proposals(pending_only=True)
+        if scope:
+            pending_proposals = [item for item in pending_proposals
+                                 if item["record"].get("scope") in {scope, "global"}]
         return {
+            "query": query.strip(),
             "summary": {
                 "active_count": len(active), "archived_count": len(removed),
                 "unknown_count": sum(r.kind == "unknown" for r in active),
@@ -171,6 +191,9 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             "scope_labels": scope_labels,
             "records": records,
             "source_hits": source_hits,
+            "context_preview": context_preview,
+            "proposals": pending_proposals[:20],
+            "proposal_count": len(pending_proposals),
             "organization": organization,
             "policies": [p for p in policies if not scope or p.get("scope", "default") == scope],
             "handoff": scoped_handoffs[-1] if scoped_handoffs else None,
@@ -190,6 +213,9 @@ def make_handler(omm: OMM):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
@@ -221,6 +247,15 @@ def make_handler(omm: OMM):
             self.end_headers()
             return False
 
+        def _same_origin(self) -> bool:
+            origin = self.headers.get("Origin")
+            if not origin:
+                return True
+            try:
+                return urlsplit(origin).netloc.lower() == self.headers.get("Host", "").lower()
+            except ValueError:
+                return False
+
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
             if not self._authorized():
                 return
@@ -246,6 +281,27 @@ def make_handler(omm: OMM):
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             if not self._authorized():
+                return
+            if not self._same_origin():
+                self._send_json(403, {"error": "Pedido recusado: a página de origem não é a OMM."})
+                return
+            proposal_match = re.fullmatch(r"/api/proposals/([A-Za-z0-9-]+)/review", urlsplit(self.path).path)
+            if proposal_match:
+                try:
+                    size = int(self.headers.get("Content-Length", "0"))
+                    if size < 1 or size > 2048:
+                        raise ValueError("pedido inválido")
+                    payload = json.loads(self.rfile.read(size))
+                    action = payload.get("action")
+                    if action not in {"approve", "reject"}:
+                        raise ValueError("Escolha aprovar ou recusar a sugestão.")
+                    proposal = omm.review_proposal(unquote(proposal_match.group(1)), action == "approve")
+                    message = "Sugestão aprovada e adicionada à busca." if action == "approve" else "Sugestão recusada; o histórico foi preservado."
+                    self._send_json(200, {"id": proposal["id"], "status": proposal["status"], "message": message})
+                except KeyError:
+                    self._send_json(404, {"error": "Essa sugestão não existe mais."})
+                except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                    self._send_json(400, {"error": str(exc) or "Pedido inválido."})
                 return
             if urlsplit(self.path).path == "/api/sync":
                 try:
@@ -284,6 +340,9 @@ def make_handler(omm: OMM):
 
         def do_DELETE(self) -> None:  # noqa: N802 - stdlib handler API
             if not self._authorized():
+                return
+            if not self._same_origin():
+                self._send_json(403, {"error": "Pedido recusado: a página de origem não é a OMM."})
                 return
             match = re.fullmatch(r"/api/records/([A-Za-z0-9-]+)", urlsplit(self.path).path)
             if not match:

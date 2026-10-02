@@ -1,12 +1,16 @@
 import json
+import io
+import os
 from pathlib import Path
 import sqlite3
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from omm.models import MemoryRecord
 from omm.service import OMM
+from omm.semantic import SemanticSearchError
 from omm.topology import load_topology
 from omm.history import HistoryImportError, accept_history, show_history_import, stage_history
 from omm.copilot_archive import import_copilot_chat
@@ -36,7 +40,7 @@ class OMMWorkflowTests(unittest.TestCase):
         self.assertEqual(result.id, record.id)
         self.assertEqual(result.evidence, ["EV-12"])
         context = self.omm.context("RAG migration")
-        self.assertIn("Source: docs/research.md", context)
+        self.assertIn("Origem: docs/research.md", context)
         self.omm.create_workstream("retrieval", "Retrieval implementation")
         self.omm.handoff("in_progress", "Migrating retrieval", ["semantic adapter"],
                          ["Which embedding backend?"], ["Define adapter API"], "codex",
@@ -55,6 +59,50 @@ class OMMWorkflowTests(unittest.TestCase):
     def test_invalid_kind_is_rejected(self):
         with self.assertRaises(ValueError):
             self.omm.remember(MemoryRecord(kind="guess", title="x", content="y", source="z"))
+
+    def test_memory_proposal_can_be_reviewed_and_approved_once(self):
+        original = MemoryRecord(kind="fact", title="Shared example protocol",
+                                content="A generic protocol is shared.", source="guide.md", scope="demo")
+        self.omm.remember(original)
+        suggestion = MemoryRecord(kind="decision", title="Shared example protocol",
+                                  content="Use the generic protocol in examples.", source="notes.md", scope="demo")
+        proposal = self.omm.propose_memory(suggestion)
+        self.assertEqual(proposal["status"], "pending")
+        self.assertEqual(proposal["possible_matches"][0]["id"], original.id)
+        accepted = self.omm.review_proposal(proposal["id"], True)
+        self.assertEqual(accepted["status"], "accepted")
+        self.assertEqual(self.omm.get_record(suggestion.id).content, suggestion.content)
+        with self.assertRaisesRegex(ValueError, "já foi revisada"):
+            self.omm.review_proposal(proposal["id"], False)
+
+    def test_semantic_search_is_opt_in_and_rebuilds_disposable_vectors(self):
+        with self.assertRaisesRegex(SemanticSearchError, "desligada"):
+            self.omm.semantic_search("protocol")
+        (self.root / "sources" / "demo").mkdir(parents=True)
+        (self.root / "sources" / "demo" / "guide.md").write_text(
+            "# Generic protocol\nA shared protocol helps projects coordinate.\n", encoding="utf-8")
+        self.omm.remember(MemoryRecord(kind="fact", title="Shared protocol",
+                                      content="Projects use one shared protocol.", source="guide.md", scope="demo"))
+
+        embedded_batches = []
+        def fake_embed(request, timeout):
+            payload = json.loads(request.data)
+            embedded_batches.append(len(payload["input"]))
+            return io.BytesIO(json.dumps({"embeddings": [[1.0, 0.0] for _ in payload["input"]]}).encode())
+
+        with patch.dict(os.environ, {"OMM_SEMANTIC_ENABLED": "true",
+                                     "OMM_EMBEDDING_URL": "http://local.test/api/embed"}):
+            semantic = OMM(self.root)
+            with patch("omm.semantic.urlopen", side_effect=fake_embed):
+                result = semantic.semantic_search("coordinating shared projects", scopes=["demo"])
+                self.assertEqual(result["memories"][0]["title"], "Shared protocol")
+                self.assertEqual(result["sources"][0]["source"],
+                                 "sources/demo/guide.md:2-2")
+                self.assertGreater(semantic.semantic.chunk_count(), 0)
+                calls_after_search = len(embedded_batches)
+                self.assertGreater(semantic.rebuild_semantic(), 0)
+                self.assertEqual(len(embedded_batches), calls_after_search,
+                                 "unchanged records and documents should reuse cached vectors")
 
     def test_web_dashboard_shows_usage_sources_and_can_archive_and_restore(self):
         record = MemoryRecord(kind="unknown", title="Cadência ainda desconhecida",
@@ -167,8 +215,8 @@ class OMMWorkflowTests(unittest.TestCase):
         self.assertEqual(hit.source, "sources/project-alpha/research.md:3-3")
         self.assertEqual(list(self.omm.store.records()), [])
         context = self.omm.context("violet cartridge handshake", scopes=["project-alpha"])
-        self.assertIn("Trechos de documentos-fonte", context)
-        self.assertIn("Localizador, não autoridade", context)
+        self.assertIn("## Fontes relacionadas", context)
+        self.assertIn("sources/project-alpha/research.md:3-3", context)
 
     def test_large_historical_markdown_is_still_searchable(self):
         source = self.root / "sources" / "project-alpha" / "long-history.md"
@@ -549,7 +597,7 @@ class OMMWorkflowTests(unittest.TestCase):
             record = MemoryRecord(kind="fact", title="Restored fact", content="Automatic restore works.",
                                   source="docs/restore.md")
             (source / "memory" / "records.jsonl").write_text(record.to_json() + "\n", encoding="utf-8")
-            for name in ("policies.jsonl", "handoffs.jsonl", "workstreams.jsonl"):
+            for name in ("policies.jsonl", "handoffs.jsonl", "workstreams.jsonl", "proposals.jsonl"):
                 (source / "memory" / name).write_text("", encoding="utf-8")
             (source / "memory" / "state.json").write_text(json.dumps({
                 "schema_version": 1, "status": "not_started", "summary": "", "blockers": [],

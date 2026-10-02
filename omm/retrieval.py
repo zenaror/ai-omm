@@ -8,11 +8,30 @@ from typing import Protocol
 from .models import MemoryRecord
 from .source_documents import SourceChunk, SourceHit
 
+MAX_QUERY_CHARS = 1200
+MAX_QUERY_TERMS = 64
+
+
+def _search_terms(query: str) -> list[str]:
+    """Keep FTS queries small and interpret them as plain words."""
+    return list(dict.fromkeys(re.findall(r"[\w]+", query[:MAX_QUERY_CHARS], flags=re.UNICODE)))[:MAX_QUERY_TERMS]
+
 
 class Retriever(Protocol):
-    def rebuild(self, records: list[MemoryRecord], source_chunks: list[SourceChunk] | None = None) -> None: ...
+    """Contract for replaceable search indexes; implementations never own canonical data."""
+    def file_signature(self) -> tuple[int, int, int] | None: ...
+    def has_expected_schema(self) -> bool: ...
+    def indexed_fingerprint(self) -> str | None: ...
+    def set_indexed_fingerprint(self, fingerprint: str) -> None: ...
+    def discard_index(self) -> None: ...
+    def rebuild(self, records: list[MemoryRecord], source_chunks: list[SourceChunk] | None = None,
+                fingerprint: str | None = None) -> None: ...
     def add(self, record: MemoryRecord) -> None: ...
-    def search(self, query: str, limit: int = 10) -> list[MemoryRecord]: ...
+    def search(self, query: str, limit: int = 10,
+               scopes: list[str] | None = None) -> list[MemoryRecord]: ...
+    def search_sources(self, query: str, limit: int = 10,
+                       scopes: list[str] | None = None) -> list[SourceHit]: ...
+    def source_chunk_count(self) -> int: ...
 
 
 class SQLiteFTSRetriever:
@@ -20,6 +39,13 @@ class SQLiteFTSRetriever:
 
     def __init__(self, path: Path):
         self.path = path
+
+    def file_signature(self) -> tuple[int, int, int] | None:
+        try:
+            stat = self.path.stat()
+            return (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        except FileNotFoundError:
+            return None
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -32,12 +58,54 @@ class SQLiteFTSRetriever:
                 db.execute("DROP TABLE records")
             db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS records USING fts5(id UNINDEXED, kind UNINDEXED, scope UNINDEXED, title, content, source, tags)")
             db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS source_chunks USING fts5(id UNINDEXED, scope UNINDEXED, path, heading, content, start_line UNINDEXED, end_line UNINDEXED)")
+            db.execute("CREATE TABLE IF NOT EXISTS index_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         except sqlite3.OperationalError as exc:
             db.close()
             raise RuntimeError("SQLite FTS5 is required for lexical retrieval") from exc
         return db
 
-    def rebuild(self, records: list[MemoryRecord], source_chunks: list[SourceChunk] | None = None) -> None:
+    def indexed_fingerprint(self) -> str | None:
+        with self._connect() as db:
+            row = db.execute("SELECT value FROM index_metadata WHERE key='canonical_fingerprint'").fetchone()
+        return row[0] if row else None
+
+    def has_expected_schema(self) -> bool:
+        """Check the disposable index without creating or repairing its tables."""
+        if not self.path.is_file():
+            return False
+        try:
+            uri = self.path.resolve().as_uri() + "?mode=ro"
+            with sqlite3.connect(uri, uri=True, timeout=1) as db:
+                tables = {row[0] for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
+                if not {"records", "source_chunks", "index_metadata"} <= tables:
+                    return False
+                record_columns = {row[1] for row in db.execute("PRAGMA table_info(records)")}
+                source_columns = {row[1] for row in db.execute("PRAGMA table_info(source_chunks)")}
+                metadata_columns = {row[1] for row in db.execute("PRAGMA table_info(index_metadata)")}
+                return (
+                    {"id", "kind", "scope", "title", "content", "source", "tags"} <= record_columns
+                    and {"id", "scope", "path", "heading", "content", "start_line", "end_line"} <= source_columns
+                    and {"key", "value"} <= metadata_columns
+                )
+        except sqlite3.Error:
+            return False
+
+    def discard_index(self) -> None:
+        """Remove only the derived search database, including SQLite sidecars."""
+        for path in (self.path, Path(str(self.path) + "-wal"), Path(str(self.path) + "-shm")):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def set_indexed_fingerprint(self, fingerprint: str) -> None:
+        with self._connect() as db:
+            db.execute("INSERT OR REPLACE INTO index_metadata(key,value) VALUES('canonical_fingerprint',?)",
+                       (fingerprint,))
+
+    def rebuild(self, records: list[MemoryRecord], source_chunks: list[SourceChunk] | None = None,
+                fingerprint: str | None = None) -> None:
         with self._connect() as db:
             db.execute("DELETE FROM records")
             db.execute("DELETE FROM source_chunks")
@@ -50,6 +118,9 @@ class SQLiteFTSRetriever:
                 [(r.id, r.scope, r.path, r.heading, r.content, r.start_line, r.end_line)
                  for r in (source_chunks or [])],
             )
+            if fingerprint is not None:
+                db.execute("INSERT OR REPLACE INTO index_metadata(key,value) VALUES('canonical_fingerprint',?)",
+                           (fingerprint,))
 
     def add(self, record: MemoryRecord) -> None:
         with self._connect() as db:
@@ -63,7 +134,7 @@ class SQLiteFTSRetriever:
             return []
         # Treat user input as plain words, not SQLite FTS operators. This keeps
         # common identifiers such as "ESP-01" and "do-not-assume" searchable.
-        terms = list(dict.fromkeys(re.findall(r"[\w]+", query, flags=re.UNICODE)))
+        terms = _search_terms(query)
         if not terms:
             return []
         # OR finds useful partial matches; BM25 ranks records containing more
@@ -86,7 +157,7 @@ class SQLiteFTSRetriever:
                        scopes: list[str] | None = None) -> list[SourceHit]:
         if not query.strip():
             return []
-        terms = list(dict.fromkeys(re.findall(r"[\w]+", query, flags=re.UNICODE)))
+        terms = _search_terms(query)
         if not terms:
             return []
         fts_query = " OR ".join(f'"{term}"' for term in terms)

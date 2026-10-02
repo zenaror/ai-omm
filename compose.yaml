@@ -15,6 +15,12 @@ services:
       OMM_WEB_PORT: 8001
       OMM_WEB_USERNAME: ${OMM_WEB_USERNAME:-omm}
       OMM_WEB_PASSWORD: ${OMM_WEB_PASSWORD:-}
+      OMM_MCP_TOKEN: ${OMM_MCP_TOKEN:-}
+      OMM_SEMANTIC_ENABLED: ${OMM_SEMANTIC_ENABLED:-false}
+      OMM_EMBEDDING_URL: ${OMM_EMBEDDING_URL:-}
+      OMM_EMBEDDING_MODEL: ${OMM_EMBEDDING_MODEL:-embeddinggemma}
+      OMM_EMBEDDING_TIMEOUT: ${OMM_EMBEDDING_TIMEOUT:-10}
+      OMM_BIND_ADDRESS: ${OMM_BIND_ADDRESS:-127.0.0.1}
     ports:
       - "${OMM_BIND_ADDRESS:-127.0.0.1}:8000:8000"
       - "${OMM_BIND_ADDRESS:-127.0.0.1}:8001:8001"
@@ -44,5 +50,26 @@ services:
     volumes:
       - ${OMM_DATA_PATH:-./omm-data}:/data
 
+  ollama:
+    profiles: ["semantic"]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+
+  ollama-model-setup:
+    profiles: ["semantic"]
+    image: curlimages/curl:latest
+    restart: "no"
+    depends_on:
+      - ollama
+    entrypoint: ["sh", "-c"]
+    command: >-
+      until curl -fsS http://ollama:11434/api/tags >/dev/null; do sleep 2; done;
+      curl -fsS http://ollama:11434/api/pull
+      -H 'Content-Type: application/json'
+      -d '{"model":"embeddinggemma","stream":false}'
+
 volumes:
   omm-index:
+  ollama-models:

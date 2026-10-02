@@ -87,7 +87,21 @@ OMM_GIT_BACKUP_USERNAME=SEU_USUARIO_DO_GIT
 OMM_GIT_BACKUP_TOKEN=COLOQUE_SEU_TOKEN_AQUI
 ```
 
-O token precisa poder ler e escrever no repositório privado de backup. `OMM_GIT_BACKUP_RESTORE=true` faz a primeira inicialização buscar a memória desse endereço. A restauração só substitui o esqueleto vazio criado pela OMM; se já houver informações, a inicialização para sem apagá-las. Para usar somente Git local, configure `OMM_GIT_BACKUP_PUSH=false` e deixe URL, usuário e token vazios. O OMM também aceita URLs de GitHub, GitLab e outros servidores Git; o provedor define o tipo de token necessário. Proteja o arquivo e gere as imagens:
+O token precisa poder ler e escrever no repositório privado de backup. `OMM_GIT_BACKUP_RESTORE=true` faz a primeira inicialização buscar a memória desse endereço. A restauração só substitui o esqueleto vazio criado pela OMM; se já houver informações, a inicialização para sem apagá-las. Para usar somente Git local, configure `OMM_GIT_BACKUP_PUSH=false` e deixe URL, usuário e token vazios. O OMM também aceita URLs de GitHub, GitLab e outros servidores Git; o provedor define o tipo de token necessário. Proteja o arquivo `.env` para que só a conta administradora possa lê-lo.
+
+### Busca semântica (opcional)
+
+A busca normal procura palavras. A busca semântica tenta achar o mesmo assunto quando a pergunta usa palavras diferentes. Para ativá-la, use o Ollama que a stack inicia e acrescente ao `.env`:
+
+```dotenv
+COMPOSE_PROFILES=backup,semantic
+OMM_SEMANTIC_ENABLED=true
+OMM_EMBEDDING_URL=http://ollama:11434/api/embed
+OMM_EMBEDDING_MODEL=embeddinggemma
+OMM_EMBEDDING_TIMEOUT=10
+```
+
+Na primeira subida, a stack baixa o modelo (cerca de 622 MB) para um volume que continua existindo após atualizações. O processamento começa pela CPU; não aumente a memória do LXC sem antes observar o uso. Se não quiser esse recurso, mantenha apenas `COMPOSE_PROFILES=backup` e `OMM_SEMANTIC_ENABLED=false`.
 
 Como o exemplo permite abrir o painel na rede, também configure um usuário e uma senha exclusivos para ele. Acrescente estas linhas ao mesmo `.env` e troque a senha de exemplo por uma senha longa que você não usa em outro lugar:
 

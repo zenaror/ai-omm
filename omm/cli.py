@@ -8,6 +8,7 @@ import sys
 
 from .models import KINDS, MemoryRecord
 from .service import OMM
+from .diagnostics import diagnose
 from .history import accept_history, list_history_imports, show_history_import, stage_history
 from .copilot_archive import import_copilot_chat
 from .claude_archive import import_claude_session
@@ -21,6 +22,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--root", type=Path, default=Path.cwd(), help="pasta do projeto OMM (padrão: pasta atual)")
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("init", help="preparar os arquivos de memória e a busca")
+    doctor = sub.add_parser("doctor", help="verificar se os arquivos, a busca e o backup estão prontos")
+    doctor.add_argument("--json", action="store_true", help="mostrar o resultado em JSON")
     remember = sub.add_parser("remember", help="guardar uma informação na memória do projeto")
     remember.add_argument("--kind", required=True, choices=sorted(KINDS), help="tipo da informação")
     remember.add_argument("--title", required=True, help="título curto para encontrar a anotação depois")
@@ -43,9 +46,17 @@ def parser() -> argparse.ArgumentParser:
     source_search.add_argument("query")
     source_search.add_argument("--limit", type=int, default=6)
     source_search.add_argument("--scope", action="append", help="limitar aos projetos informados")
+    semantic = sub.add_parser("semantic-search", help="buscar por significado com o serviço opcional configurado")
+    semantic.add_argument("query")
+    semantic.add_argument("--mode", choices=["all", "memory", "sources"], default="all")
+    semantic.add_argument("--limit", type=int, default=5)
+    semantic.add_argument("--scope", action="append", help="limitar aos projetos informados")
+    sub.add_parser("semantic-rebuild", help="recriar o índice semântico local")
     context = sub.add_parser("context", help="preparar um resumo para passar a um assistente")
     context.add_argument("query")
-    context.add_argument("--limit", type=int, default=10)
+    context.add_argument("--limit", type=int, default=5)
+    context.add_argument("--budget-chars", type=int, default=5000, help="limite aproximado do contexto preparado")
+    context.add_argument("--include-sources", action="store_true", help="inclui até dois trechos de documentos-fonte")
     context.add_argument("--workstream-id")
     context.add_argument("--scope", action="append", help="incluir apenas estes alcances; pode ser usado mais de uma vez")
     handoff = sub.add_parser("handoff", help="anotar onde o trabalho parou e o que vem depois")
@@ -99,6 +110,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "init":
         omm.init()
         print(f"OMM preparado em {omm.root}")
+    elif args.command == "doctor":
+        checks = diagnose(omm)
+        if args.json:
+            print(json.dumps(checks, ensure_ascii=False, indent=2))
+        else:
+            icons = {"ok": "✓", "warning": "!", "error": "✗", "info": "i"}
+            for check in checks:
+                print(f"{icons.get(check['status'], '-')} {check['message']}")
+        return 1 if any(check["status"] == "error" for check in checks) else 0
     elif args.command == "remember":
         record = MemoryRecord(kind=args.kind, title=args.title, content=args.content, source=args.source,
                               evidence=args.evidence, tags=args.tag, role=args.role,
@@ -118,9 +138,15 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"id": hit.id, "scope": hit.scope, "heading": hit.heading,
                               "content": hit.content, "source": hit.source,
                               "authority": "locator_only"}, ensure_ascii=False))
+    elif args.command == "semantic-search":
+        print(json.dumps(omm.semantic_search(args.query, args.mode, args.limit, args.scope),
+                         ensure_ascii=False, indent=2))
+    elif args.command == "semantic-rebuild":
+        print(f"Índice semântico recriado: {omm.rebuild_semantic()} itens")
     elif args.command == "context":
         state_scope = args.scope[-1] if args.scope else None
-        sys.stdout.write(omm.context(args.query, args.limit, args.workstream_id, args.scope, state_scope))
+        sys.stdout.write(omm.context(args.query, args.limit, args.workstream_id, args.scope, state_scope,
+                                     include_sources=args.include_sources, budget_chars=args.budget_chars))
     elif args.command == "handoff":
         omm.handoff(args.status, args.summary, args.blocker, args.question, args.next_actions, args.by,
                     args.session_id, args.workstream_id, args.scope)

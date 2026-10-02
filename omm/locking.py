@@ -58,7 +58,11 @@ def data_lock(root: Path) -> Iterator[None]:
             locks[key] = (stream, depth - 1)
         return
 
-    lock_path = resolved / ".omm-write.lock"
+    git_metadata = resolved / ".git"
+    # Keep coordination state outside the visible working tree once the data
+    # folder is a repository. A fresh pre-restore folder still uses the root.
+    lock_path = ((git_metadata / "omm-write.lock") if git_metadata.is_dir()
+                 else resolved / ".omm-write.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+", encoding="utf-8") as stream:
         _acquire(stream)

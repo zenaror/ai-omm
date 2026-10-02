@@ -41,3 +41,10 @@ def redact_text(text: str) -> tuple[str, dict[str, int]]:
     text = _HOME_PATH.sub("$HOME", text)
     text = _MEDIA_PROJECTS_PATH.sub("$PROJECTS/", text)
     return text, counts
+
+
+def find_credentials(text: str) -> list[str]:
+    """Return credential categories found, without changing or returning their values."""
+    _, counts = redact_text(text)
+    return [name for name in ("tokens", "key_values", "private_keys", "credential_urls")
+            if counts[name]]
