@@ -103,6 +103,10 @@ class OMMWorkflowTests(unittest.TestCase):
                 self.assertGreater(semantic.rebuild_semantic(), 0)
                 self.assertEqual(len(embedded_batches), calls_after_search,
                                  "unchanged records and documents should reuse cached vectors")
+                result = semantic.semantic_search("does not need a query vector", limit=0)
+                self.assertEqual(result, {"memories": [], "sources": []})
+                self.assertEqual(len(embedded_batches), calls_after_search,
+                                 "a zero result limit should not call the embedding service")
 
     def test_web_dashboard_shows_usage_sources_and_can_archive_and_restore(self):
         record = MemoryRecord(kind="unknown", title="Cadência ainda desconhecida",

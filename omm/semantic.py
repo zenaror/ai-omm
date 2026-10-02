@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import heapq
 import math
 from pathlib import Path
 import sqlite3
@@ -136,44 +137,57 @@ class OllamaSemanticIndex:
                            [("model", self.model), ("fingerprint", fingerprint)])
         return len(items)
 
-    def _rank(self, query: str, kind: str, limit: int, scopes: list[str] | None) -> list[tuple[float, tuple]]:
-        if not query.strip():
+    def _rank(self, query: str, kind: str, limit: int,
+              scopes: list[str] | None) -> list[tuple[float, tuple]]:
+        limit = max(0, min(int(limit), 100))
+        if not query.strip() or limit == 0 or scopes == []:
             return []
         query_vector = self._embed([query[:1200]])[0]
         with self._connect() as db:
-            sql = ("SELECT id,scope,title,content,source,start_line,end_line,vector "
+            # Content is deliberately fetched only for final source hits. Loading
+            # every chunk's text for ranking wastes memory on large collections.
+            sql = ("SELECT id,scope,title,source,start_line,end_line,vector "
                    "FROM semantic_vectors WHERE kind=?")
             params: list[object] = [kind]
             if scopes is not None:
-                if not scopes:
-                    return []
                 sql += f" AND scope IN ({','.join('?' for _ in scopes)})"
                 params.extend(scopes)
-            rows = db.execute(sql, params).fetchall()
-        ranked = []
-        for row in rows:
-            try:
-                vector = json.loads(row[7])
-                if len(vector) != len(query_vector):
+            best: list[tuple[float, int, tuple]] = []
+            for position, row in enumerate(db.execute(sql, params)):
+                try:
+                    vector = json.loads(row[6])
+                    if len(vector) != len(query_vector):
+                        continue
+                    score = sum(left * float(right) for left, right in zip(query_vector, vector))
+                except (TypeError, ValueError, json.JSONDecodeError):
                     continue
-                score = sum(left * float(right) for left, right in zip(query_vector, vector))
-            except (TypeError, ValueError, json.JSONDecodeError):
-                continue
-            ranked.append((score, row[:7]))
-        ranked.sort(key=lambda item: item[0], reverse=True)
-        return ranked[:max(0, min(int(limit), 100))]
+                candidate = (score, -position, row[:6])
+                if len(best) < limit:
+                    heapq.heappush(best, candidate)
+                elif candidate[:2] > best[0][:2]:
+                    heapq.heapreplace(best, candidate)
+        best.sort(key=lambda item: (-item[0], -item[1]))
+        return [(score, row) for score, _, row in best]
 
     def search_memories(self, query: str, limit: int = 5,
-                        scopes: list[str] | None = None) -> list[tuple[float, MemoryRecord]]:
-        return [(score, MemoryRecord(id=row[0], scope=row[1], kind="fact", title=row[2],
-                                     content=row[3], source=row[4]))
-                for score, row in self._rank(query, "memory", limit, scopes)]
+                        scopes: list[str] | None = None) -> list[tuple[float, str]]:
+        return [(score, row[0]) for score, row in self._rank(query, "memory", limit, scopes)]
 
     def search_sources(self, query: str, limit: int = 5,
                        scopes: list[str] | None = None) -> list[tuple[float, SourceHit]]:
-        return [(score, SourceHit(id=row[0], scope=row[1], heading=row[2], content=row[3],
-                                  path=row[4], start_line=row[5] or 1, end_line=row[6] or 1))
-                for score, row in self._rank(query, "source", limit, scopes)]
+        ranked = self._rank(query, "source", limit, scopes)
+        if not ranked:
+            return []
+        ids = [row[0] for _, row in ranked]
+        with self._connect() as db:
+            contents = dict(db.execute(
+                f"SELECT id,content FROM semantic_vectors WHERE kind='source' AND id IN ({','.join('?' for _ in ids)})",
+                ids,
+            ).fetchall())
+        return [(score, SourceHit(id=row[0], scope=row[1], heading=row[2],
+                                  content=contents.get(row[0], ""), path=row[3],
+                                  start_line=row[4] or 1, end_line=row[5] or 1))
+                for score, row in ranked]
 
     def chunk_count(self) -> int:
         if not self.path.is_file():

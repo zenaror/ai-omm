@@ -58,6 +58,8 @@
 
 **Busca substituível:** a OMM separa a busca dos arquivos canônicos. SQLite/FTS5 vem pronto e não precisa de outro serviço. Se a pessoa habilitar, a busca semântica usa um serviço compatível com embeddings do Ollama. Nenhuma busca muda o formato das memórias.
 
+**Custo da busca semântica:** a busca compara os vetores existentes, mas mantém apenas os melhores resultados enquanto percorre o índice e só abre o texto dos trechos escolhidos. Isso evita guardar todos os textos candidatos e ordenar a coleção inteira. A comparação ainda percorre o índice completo; uma coleção muito grande pode pedir uma tecnologia de busca vetorial dedicada no futuro.
+
 **Revisão antes de guardar:** agentes podem propor novas anotações; a pessoa aprova ou recusa no painel. A lista de possíveis semelhantes usa palavras como pista, não decide sozinha se há conflito. O arquivo `memory/proposals.jsonl` é dado canônico e segue no backup Git.
 
 **Avaliação de busca:** manter um pequeno conjunto sintético, sem dados pessoais, para medir se buscas de exemplo encontram as memórias e fontes esperadas e quanto texto o contexto prepara. Isso ajuda a perceber regressões sem usar serviços externos.

@@ -314,8 +314,8 @@ class OMM:
             output: dict[str, list[dict]] = {"memories": [], "sources": []}
             if mode in {"all", "memory"}:
                 canonical = self._records_by_id()
-                for score, hit in self.semantic.search_memories(query, count, scopes):
-                    record = canonical.get(hit.id)
+                for score, record_id in self.semantic.search_memories(query, count, scopes):
+                    record = canonical.get(record_id)
                     if record:
                         output["memories"].append({"id": record.id, "kind": record.kind,
                             "title": record.title, "content": record.content[:600],

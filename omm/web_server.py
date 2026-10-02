@@ -47,6 +47,28 @@ def _skills(root: Path) -> list[dict]:
     return result
 
 
+def _tree_stats(root: Path) -> tuple[int, float, list[Path]]:
+    """Summarize a canonical folder in one walk for the management screen."""
+    total_bytes = 0
+    newest_change = 0.0
+    markdown_files: list[Path] = []
+    if not root.exists():
+        return total_bytes, newest_change, markdown_files
+    for directory, _, filenames in os.walk(root):
+        for filename in filenames:
+            path = Path(directory, filename)
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            total_bytes += stat.st_size
+            if not path.is_symlink():
+                newest_change = max(newest_change, stat.st_mtime)
+                if path.suffix.lower() == ".md":
+                    markdown_files.append(path)
+    return total_bytes, newest_change, markdown_files
+
+
 def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bool = False) -> dict:
     """Return canonical data for the screen; SQLite is used only to find active notes."""
     with omm.operation_lock():
@@ -99,14 +121,12 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             kinds[r.kind] = kinds.get(r.kind, 0) + 1
             by_scope[r.scope] = by_scope.get(r.scope, 0) + 1
         memory_root = omm.root / "memory"
-        memory_bytes = sum(p.stat().st_size for p in memory_root.rglob("*") if p.is_file()) if memory_root.exists() else 0
-        source_bytes = sum(p.stat().st_size for p in source_root.rglob("*") if p.is_file()) if source_root.exists() else 0
+        memory_bytes, memory_change, _ = _tree_stats(memory_root)
+        source_bytes, source_change, source_markdown = _tree_stats(source_root)
         index_path = omm.root / ".omm" / "index.sqlite3"
         index_bytes = index_path.stat().st_size if index_path.exists() else 0
         index_updated_at = datetime.fromtimestamp(index_path.stat().st_mtime).astimezone().isoformat(timespec="minutes") if index_path.exists() else None
-        canonical_files = [path for base in (memory_root, source_root) if base.exists()
-                           for path in base.rglob("*") if path.is_file() and not path.is_symlink()]
-        newest_canonical_change = max((path.stat().st_mtime for path in canonical_files), default=0)
+        newest_canonical_change = max(memory_change, source_change)
         index_current = bool(index_path.exists() and index_path.stat().st_mtime >= newest_canonical_change)
         backup_commit_at = None
         try:
@@ -137,7 +157,8 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
         project_sources = []
         selected_source_root = source_root / scope if scope in scopes and scope and source_root.exists() else None
         if selected_source_root and selected_source_root.is_dir():
-            for path in sorted(selected_source_root.rglob("*.md")):
+            for path in sorted(path for path in source_markdown
+                               if path.is_relative_to(selected_source_root)):
                 if path.is_symlink() or not path.is_file():
                     continue
                 relative = path.relative_to(omm.root).as_posix()
