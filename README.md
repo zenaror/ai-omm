@@ -38,6 +38,8 @@ Por padrão, a OMM usa busca textual local. A busca semântica é opcional: em v
 
 Para medir a busca sem acessar a internet nem usar dados pessoais, rode `python3 benchmarks/retrieval_eval.py`.
 
+Para medir tempos com uma coleção inventada, rode `python3 benchmarks/performance_eval.py`. O relatório mostra a criação do índice, busca, montagem de contexto e painel. Os dados são apagados ao terminar; por padrão, a busca medida é a textual e não inclui o Ollama.
+
 ## Código e dados ficam separados
 
 O repositório da aplicação guarda o programa. A pasta de dados guarda suas notas, regras, skills e documentos. Essa separação permite atualizar o programa sem apagar suas informações. O índice de busca é recriado a partir dos dados.
