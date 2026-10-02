@@ -308,8 +308,14 @@ class OMM:
         with self.operation_lock():
             self._ensure_index_current()
             fingerprint = self._canonical_fingerprint()
-            if self.semantic.indexed_fingerprint() != fingerprint:
-                self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root), fingerprint)
+            if scopes is None:
+                stale_scopes = None if self.semantic.indexed_fingerprint() != fingerprint else []
+            else:
+                stale_scopes = sorted({scope for scope in scopes
+                                       if self.semantic.indexed_fingerprint(scope) != fingerprint})
+            if stale_scopes is None or stale_scopes:
+                self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root),
+                                      fingerprint, stale_scopes)
             count = max(0, min(int(limit), 10))
             query_vector = None
             if mode == "all" and count and query.strip() and scopes != []:

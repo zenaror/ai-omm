@@ -90,13 +90,20 @@ class OMMWorkflowTests(unittest.TestCase):
         (self.root / "sources" / "demo").mkdir(parents=True)
         (self.root / "sources" / "demo" / "guide.md").write_text(
             "# Generic protocol\nA shared protocol helps projects coordinate.\n", encoding="utf-8")
+        (self.root / "sources" / "other").mkdir(parents=True)
+        (self.root / "sources" / "other" / "private.md").write_text(
+            "# Unrelated project notes\nThis belongs to another project scope.\n", encoding="utf-8")
         self.omm.remember(MemoryRecord(kind="fact", title="Shared protocol",
                                       content="Projects use one shared protocol.", source="guide.md", scope="demo"))
+        self.omm.remember(MemoryRecord(kind="fact", title="Unrelated protocol",
+                                      content="This is outside the requested scope.", source="private.md", scope="other"))
 
         embedded_batches = []
+        embedded_texts = []
         def fake_embed(request, timeout):
             payload = json.loads(request.data)
             embedded_batches.append(len(payload["input"]))
+            embedded_texts.extend(payload["input"])
             return io.BytesIO(json.dumps({"embeddings": [[1.0, 0.0] for _ in payload["input"]]}).encode())
 
         with patch.dict(os.environ, {"OMM_SEMANTIC_ENABLED": "true",
@@ -113,22 +120,41 @@ class OMMWorkflowTests(unittest.TestCase):
                 self.assertEqual(result["memories"][0]["title"], "Shared protocol")
                 self.assertEqual(result["sources"][0]["source"],
                                  "sources/demo/guide.md:2-2")
+                self.assertTrue(all("Unrelated" not in text and "another project scope" not in text
+                                    for text in embedded_texts),
+                                "a project search must not embed material from other scopes")
                 self.assertEqual(embedded_batches[-1], 1,
                                  "one combined semantic search should embed its query only once")
-                self.assertGreater(semantic.semantic.chunk_count(), 0)
+                self.assertEqual(semantic.semantic.chunk_count(), 2,
+                                 "only the requested scope should be added to the semantic index")
+                self.assertEqual(semantic.semantic.indexed_fingerprint("demo"),
+                                 semantic._canonical_fingerprint())
+                self.assertIsNone(semantic.semantic.indexed_fingerprint(),
+                                  "a scoped index must not claim the full corpus is indexed")
+                other_result = semantic.semantic_search("another project scope", scopes=["other"])
+                self.assertEqual(other_result["memories"][0]["title"], "Unrelated protocol")
+                self.assertEqual(other_result["sources"][0]["scope"], "other")
+                self.assertEqual(semantic.semantic.chunk_count(), 4,
+                                 "adding a scope must preserve vectors already indexed for other scopes")
                 before_report = len(embedded_batches)
                 report = measure_performance(semantic, repetitions=2)
                 self.assertTrue(report["semantic_index_current"])
                 self.assertIn("semantic_search", report["measurements"])
                 self.assertEqual(embedded_batches[before_report:], [1, 1],
                                  "the opt-in report should run only bounded generic queries")
-                calls_after_search = len(embedded_batches)
+                calls_before_full_rebuild = len(embedded_batches)
                 self.assertGreater(semantic.rebuild_semantic(), 0)
-                self.assertEqual(len(embedded_batches), calls_after_search,
+                self.assertEqual(len(embedded_batches), calls_before_full_rebuild,
+                                 "an explicit full rebuild should reuse all unchanged scoped vectors")
+                self.assertEqual(semantic.semantic.indexed_fingerprint(),
+                                 semantic._canonical_fingerprint())
+                calls_after_full_rebuild = len(embedded_batches)
+                semantic.rebuild_semantic()
+                self.assertEqual(len(embedded_batches), calls_after_full_rebuild,
                                  "unchanged records and documents should reuse cached vectors")
                 result = semantic.semantic_search("does not need a query vector", limit=0)
                 self.assertEqual(result, {"memories": [], "sources": []})
-                self.assertEqual(len(embedded_batches), calls_after_search,
+                self.assertEqual(len(embedded_batches), calls_after_full_rebuild,
                                  "a zero result limit should not call the embedding service")
 
     def test_web_dashboard_shows_usage_sources_and_can_archive_and_restore(self):

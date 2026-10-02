@@ -72,26 +72,31 @@ class OllamaSemanticIndex:
         db.execute("CREATE TABLE IF NOT EXISTS semantic_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         return db
 
-    def indexed_fingerprint(self) -> str | None:
+    def indexed_fingerprint(self, scope: str | None = None) -> str | None:
         if not self.path.is_file():
             return None
         try:
             with sqlite3.connect(self.path, timeout=5) as db:
-                row = db.execute("SELECT value FROM semantic_metadata WHERE key='fingerprint'").fetchone()
+                key = "fingerprint" if scope is None else "scope:" + scope
+                row = db.execute("SELECT value FROM semantic_metadata WHERE key=?", (key,)).fetchone()
                 model = db.execute("SELECT value FROM semantic_metadata WHERE key='model'").fetchone()
             return row[0] if row and model and model[0] == self.model else None
         except sqlite3.Error:
             return None
 
-    def rebuild(self, records: list[MemoryRecord], chunks: list[SourceChunk], fingerprint: str) -> int:
+    def rebuild(self, records: list[MemoryRecord], chunks: list[SourceChunk], fingerprint: str,
+                scopes: list[str] | None = None) -> int:
+        selected_scopes = None if scopes is None else set(scopes)
         items: list[tuple[str, str, str, str, str, str, int | None, int | None]] = []
         items.extend(("memory", record.id, record.scope, record.title,
                       record.title + "\n" + record.content + "\n" + " ".join(record.tags),
                       record.source, None, None)
-                     for record in records if record.status == "active")
+                     for record in records if record.status == "active" and
+                     (selected_scopes is None or record.scope in selected_scopes))
         items.extend(("source", chunk.id, chunk.scope, chunk.heading,
                       chunk.heading + "\n" + chunk.content, chunk.path,
-                      chunk.start_line, chunk.end_line) for chunk in chunks)
+                      chunk.start_line, chunk.end_line) for chunk in chunks if
+                     (selected_scopes is None or chunk.scope in selected_scopes))
         # Reuse unchanged vectors when only one memory or source has changed.
         # This keeps ordinary updates from sending the whole collection again.
         cached: dict[tuple[str, str], tuple[tuple, list[float]]] = {}
@@ -100,8 +105,16 @@ class OllamaSemanticIndex:
                 with sqlite3.connect(self.path, timeout=5) as db:
                     model_row = db.execute("SELECT value FROM semantic_metadata WHERE key='model'").fetchone()
                     if model_row and model_row[0] == self.model:
-                        for row in db.execute(
-                                "SELECT kind,id,scope,title,content,source,start_line,end_line,vector FROM semantic_vectors"):
+                        sql = ("SELECT kind,id,scope,title,content,source,start_line,end_line,vector "
+                               "FROM semantic_vectors")
+                        params: tuple[str, ...] = ()
+                        if selected_scopes is not None:
+                            if not selected_scopes:
+                                sql += " WHERE 0"
+                            else:
+                                sql += " WHERE scope IN (" + ",".join("?" for _ in selected_scopes) + ")"
+                                params = tuple(sorted(selected_scopes))
+                        for row in db.execute(sql, params):
                             try:
                                 cached[(row[0], row[1])] = (tuple(row[:8]), json.loads(row[8]))
                             except (TypeError, ValueError, json.JSONDecodeError):
@@ -125,16 +138,32 @@ class OllamaSemanticIndex:
             raise SemanticSearchError("O índice semântico ficou incompleto; tente reconstruí-lo novamente.")
         complete_vectors = [vector for vector in vectors if vector is not None]
         with self._connect() as db:
-            db.execute("DELETE FROM semantic_vectors")
-            db.execute("DELETE FROM semantic_metadata")
+            if selected_scopes is None:
+                db.execute("DELETE FROM semantic_vectors")
+                db.execute("DELETE FROM semantic_metadata WHERE key='fingerprint' OR key LIKE 'scope:%'")
+            elif selected_scopes:
+                placeholders = ",".join("?" for _ in selected_scopes)
+                db.execute(f"DELETE FROM semantic_vectors WHERE scope IN ({placeholders})",
+                           tuple(sorted(selected_scopes)))
+                db.executemany("DELETE FROM semantic_metadata WHERE key=?",
+                               [("scope:" + scope,) for scope in selected_scopes])
             db.executemany(
                 "INSERT INTO semantic_vectors(kind,id,scope,title,content,source,start_line,end_line,vector) "
                 "VALUES(?,?,?,?,?,?,?,?,?)",
                 [(*item, json.dumps(vector, separators=(",", ":")))
                  for item, vector in zip(items, complete_vectors)],
             )
-            db.executemany("INSERT INTO semantic_metadata(key,value) VALUES(?,?)",
-                           [("model", self.model), ("fingerprint", fingerprint)])
+            db.execute("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES('model',?)",
+                       (self.model,))
+            if selected_scopes is None:
+                db.execute("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES('fingerprint',?)",
+                           (fingerprint,))
+                db.executemany("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES(?,?)",
+                               [("scope:" + scope, fingerprint)
+                                for scope in sorted({item[2] for item in items})])
+            else:
+                db.executemany("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES(?,?)",
+                               [("scope:" + scope, fingerprint) for scope in sorted(selected_scopes)])
         return len(items)
 
     def _rank(self, query: str, kind: str, limit: int,

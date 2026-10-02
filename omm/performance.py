@@ -48,8 +48,9 @@ def measure_performance(omm: OMM, repetitions: int = 5) -> dict:
     semantic_entries = 0
     if omm.semantic is not None:
         try:
-            semantic_current = (index_current and
-                                omm.semantic.indexed_fingerprint() == omm._canonical_fingerprint())
+            semantic_current = (index_current and bool(scopes) and
+                                all(omm.semantic.indexed_fingerprint(scope) == omm._canonical_fingerprint()
+                                    for scope in scopes))
             semantic_entries = omm.semantic.chunk_count()
         except (OSError, RuntimeError):
             semantic_current = False
@@ -90,7 +91,7 @@ def measure_performance(omm: OMM, repetitions: int = 5) -> dict:
         notes.append("A busca semântica usa apenas uma pergunta genérica e chama o serviço de embeddings configurado.")
         try:
             measurements["semantic_search"] = _measure(
-                lambda: omm.semantic_search(semantic_query, "all", 5, None),
+                lambda: omm.semantic_search(semantic_query, "all", 5, scopes),
                 semantic_repetitions, warmup=False)
             result["semantic_repetitions"] = semantic_repetitions
         except (SemanticSearchError, OSError, RuntimeError, sqlite3.Error) as exc:
