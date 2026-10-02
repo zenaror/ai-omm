@@ -1,5 +1,9 @@
 services:
   ollama:
+    # LXC non-privilegiado precisa receber o grupo render que possui o dispositivo.
+    # Troque OLLAMA_GPU_RENDER_GID se o grupo render dentro do LXC usar outro número.
+    group_add:
+      - "${OLLAMA_GPU_RENDER_GID:-104}"
     devices:
       - /dev/dri:/dev/dri
     environment:

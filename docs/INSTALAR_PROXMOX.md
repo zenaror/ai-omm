@@ -101,7 +101,7 @@ OMM_EMBEDDING_MODEL=embeddinggemma
 OMM_EMBEDDING_TIMEOUT=10
 ```
 
-Na primeira subida, a stack baixa o modelo (cerca de 622 MB) para um volume que continua existindo após atualizações. Por padrão, o processamento começa pela CPU. Para usar uma GPU Intel Arc disponível no LXC, inclua `compose.intel-gpu.yaml` como **Additional paths** na stack Git do Portainer; isso passa `/dev/dri` ao Ollama e ativa Vulkan. O LXC também precisa expor esse caminho. Se não quiser esse recurso, mantenha apenas `COMPOSE_PROFILES=backup` e `OMM_SEMANTIC_ENABLED=false`.
+Na primeira subida, a stack baixa o modelo (cerca de 622 MB) para um volume que continua existindo após atualizações. Por padrão, o processamento começa pela CPU. Para usar uma GPU Intel Arc disponível no LXC, inclua `compose.intel-gpu.yaml` como **Additional paths** na stack Git do Portainer; isso passa `/dev/dri` ao Ollama e ativa Vulkan. O LXC também precisa expor esse caminho e dar acesso ao grupo `render`. Em LXC não privilegiado, o Proxmox pode mostrar a placa como `nobody`; nesse caso, é preciso mapear o grupo `render` do host para o LXC. Defina `OLLAMA_GPU_RENDER_GID` com o número do grupo `render` dentro do LXC (neste exemplo, `104`). Sem esse acesso, o dispositivo aparece no container, mas o Ollama recebe “Permission denied” e usa CPU. Se não quiser GPU, não inclua o arquivo adicional.
 
 Como o exemplo permite abrir o painel na rede, também configure um usuário e uma senha exclusivos para ele. Acrescente estas linhas ao mesmo `.env` e troque a senha de exemplo por uma senha longa que você não usa em outro lugar:
 
