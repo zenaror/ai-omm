@@ -2,6 +2,13 @@
 
 Conectar o MCP deixa as ferramentas disponíveis. Uma instrução curta ensina o agente quando usá-las. Pense no MCP como uma caixa de ferramentas e no `AGENTS.md` como um bilhete explicando quando abri-la.
 
+```mermaid
+flowchart LR
+    mcp[Conexão MCP] -->|entrega ferramentas| agente[Assistente]
+    instrucoes[AGENTS.md do projeto] -->|explica quando usá-las| agente
+    agente -->|consulta e atualiza| omm[OMM]
+```
+
 ## 1. Conecte o assistente
 
 Siga [Ligar um assistente à OMM](USAR_MCP.md). Depois, confirme em uma conversa nova que o assistente consegue ver as ferramentas.

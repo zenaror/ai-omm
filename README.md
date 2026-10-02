@@ -2,6 +2,19 @@
 
 OMM é um caderno compartilhado para assistentes de IA. Ele ajuda a guardar decisões, descobertas e próximos passos para que uma nova conversa não precise começar do zero.
 
+```mermaid
+flowchart LR
+    voce[Você] --> agente[Assistente de IA]
+    agente <-->|MCP| omm[OMM]
+    omm --> arquivos[Memórias e documentos no Git]
+    omm --> indice[Índice de busca recriável]
+    indice --> palavras[Busca por palavras]
+    indice --> assunto[Busca por assunto opcional]
+    assunto --> ollama[Ollama local]
+```
+
+Os arquivos guardam a memória. O índice só ajuda a encontrá-la e pode ser recriado.
+
 ## Comece em poucos minutos
 
 Você precisa de Python 3.11 ou mais recente. Na pasta do projeto, instale e prepare a OMM:

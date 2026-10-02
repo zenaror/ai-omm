@@ -52,11 +52,17 @@ A busca comum encontra palavras que aparecem na anotação. A busca semântica t
 
 Para fazer essa busca, a OMM usa o Ollama com o modelo `embeddinggemma`. O modelo transforma textos em números para comparar os assuntos. Ele não escreve respostas. A OMM continua sendo dona dos arquivos; o índice de busca pode ser recriado.
 
-```text
-Agente ── MCP ──> OMM ── rede privada ──> Ollama
-                                         ├─ CPU (padrão)
-                                         └─ Intel Arc via /dev/dri (opcional)
+```mermaid
+flowchart LR
+    agente[Assistente] <-->|MCP| omm[OMM]
+    omm --> palavras[Busca por palavras local]
+    omm -->|opcional: pergunta e textos para comparar| ollama[Ollama na rede privada]
+    ollama -->|vetores| omm
+    ollama --- cpu[CPU padrão]
+    ollama --- gpu[Intel Arc opcional]
 ```
+
+Semântica é opcional: a busca normal continua funcionando se o Ollama estiver desligado.
 
 ### Ativar na stack Docker ou Portainer
 

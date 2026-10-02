@@ -2,12 +2,11 @@
 
 Este guia é opcional. Sem GPU, a busca semântica continua funcionando pela CPU.
 
-```text
-GPU Intel no Proxmox
-        ↓ grupo render
-LXC permite o acesso
-        ↓ /dev/dri + grupo
-Ollama usa Vulkan
+```mermaid
+flowchart LR
+    gpu[GPU Intel no Proxmox] -->|grupo render| lxc[LXC permite o acesso]
+    lxc -->|/dev/dri + grupo| ollama[Ollama no Docker]
+    ollama -->|Vulkan| busca[Busca semântica]
 ```
 
 ## 1. Descubra o número do grupo `render`
