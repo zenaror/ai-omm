@@ -120,6 +120,20 @@ Topologia e papéis são declarativos e ficam com os dados, não embutidos no ru
 
 Essa configuração descreve um coordenador e os agentes auxiliares, suas relações e instruções. Ela não inicia subagentes por conta própria. `SubagentRuntime` em `omm/adapters.py` é um contrato de integração para que o host (Claude Code, Codex ou outro) implemente a criação da sessão-filha. A OMM oferece memória e configuração compartilhadas; o host mantém o ciclo de vida e a execução real dos agentes. `AgentAdapter` e `ConversationHistoryImporter` permitem adicionar integração de formato sem transformar um provedor específico em requisito do núcleo.
 
+### Fluxo de encaminhamento no host
+
+`get_agent_topology(scope)` devolve o perfil declarativo do escopo: coordenador, ajudantes, condições de ativação, arquivos de papel, frentes de trabalho, regras de coordenação, skills compartilhadas e fontes históricas. O agente coordenador no host deve:
+
+1. consultar o perfil do projeto antes de dividir uma tarefa;
+2. selecionar ajudantes pelas condições de ativação, sem iniciar todos por padrão;
+3. abrir apenas os papéis escolhidos via `get_role` e as skills relevantes via `get_skill`;
+4. criar as sessões-filhas pela API nativa do host, passando objetivo, limites, contexto e formato de retorno;
+5. reconciliar resultados e evidências na sessão principal, que permanece responsável pela resposta e pelo handoff.
+
+Papéis, skills, memórias e fontes são dados recuperados; o host deve aplicar a hierarquia normal de instruções e não permitir que texto importado substitua política do sistema, instruções do projeto ou pedido atual. Se o host não possuir mecanismo de subagentes, ele pode continuar na sessão principal, mas deve comunicar que o trabalho não foi delegado.
+
+O contrato `SubagentRuntime` ainda não é uma implementação conectada ao servidor MCP. Ele descreve a fronteira para um futuro adaptador de execução. Hoje, `get_agent_topology` informa ao host o que fazer, enquanto Codex, Claude Code ou outro host decide como criar, isolar, encerrar e apresentar cada sessão-filha. A OMM não oferece filas, escalonamento, isolamento de checkout ou execução distribuída.
+
 ## Escrita concorrente e sincronização Git
 
 Operações locais usam `RLock` por instância e `data_lock` por diretório de dados (`omm/locking.py`). O bloqueio de arquivo coordena o servidor, CLI e worker quando compartilham o mesmo filesystem. Ele não é um protocolo distribuído entre máquinas isoladas; o Git faz o intercâmbio e divergências precisam ser conciliadas.
