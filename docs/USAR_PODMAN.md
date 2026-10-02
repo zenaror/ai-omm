@@ -66,7 +66,7 @@ COMPOSE_PROFILES=backup
 OMM_GIT_BACKUP_ENABLED=true
 ```
 
-O backup usa a mesma pasta de dados. Um serviço remoto, como GitHub, GitLab ou Gitea, só é necessário se você quiser enviar uma cópia para outro servidor. Veja [Ligar um assistente à OMM](../USAR_MCP.md#backup-automático-no-git-opcional) para as outras opções.
+O backup usa a mesma pasta de dados. Um serviço remoto, como GitHub, GitLab ou Gitea, só é necessário se você quiser enviar uma cópia para outro servidor. Veja [Ligar um assistente à OMM](USAR_MCP.md#backup-automático-no-git-opcional) para as outras opções.
 
 Inicie com o perfil de backup:
 
@@ -99,7 +99,7 @@ Em computadores com SELinux, o sistema pode bloquear o acesso mesmo quando as pe
 
 ## Acesso pela rede
 
-Por padrão, as portas ficam abertas apenas no mesmo computador. Para usar o MCP e o painel de outro computador, configure `OMM_BIND_ADDRESS=0.0.0.0` no `.env` e reinicie os serviços. Isso deixa as portas visíveis na rede. Configure `OMM_MCP_TOKEN` para proteger o MCP e veja as orientações de segurança em [USAR_MCP.md](../USAR_MCP.md#proteger-o-mcp-quando-usar-pela-rede) e [PAINEL_WEB.md](../PAINEL_WEB.md).
+Por padrão, as portas ficam abertas apenas no mesmo computador. Para usar o MCP e o painel de outro computador, configure `OMM_BIND_ADDRESS=0.0.0.0` no `.env` e reinicie os serviços. Isso deixa as portas visíveis na rede. Configure `OMM_MCP_TOKEN` para proteger o MCP e veja as orientações de segurança em [USAR_MCP.md](USAR_MCP.md#proteger-o-mcp-quando-usar-pela-rede) e [PAINEL_WEB.md](PAINEL_WEB.md).
 
 ## Referências
 

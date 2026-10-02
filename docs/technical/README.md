@@ -1,8 +1,8 @@
-# Material técnico
+# Referência técnica
 
-Estas páginas são opcionais. Elas explicam configurações avançadas e escolhas internas da OMM. Para começar sem esses detalhes, volte ao [guia principal](../../README.md).
+Esta pasta documenta a arquitetura e as escolhas internas da OMM para quem já trabalha com software, IA, RAG e MCP. Os guias de instalação e uso ficam em [`docs/`](../../README.md), escritos para quem está começando.
 
-- [Instalar em um LXC do Proxmox](INSTALAR_PROXMOX.md)
-- [Passar uma GPU Intel ao Ollama](GPU_INTEL_PROXMOX.md)
-- [Usar a OMM com Podman](USAR_PODMAN.md)
-- [Decisões de arquitetura](DECISOES.md)
+- [Arquitetura da OMM](ARQUITETURA.md): dados canônicos, indexação, retrieval, MCP, agentes e operação.
+- [Decisões de arquitetura](DECISOES.md): decisões adotadas e seus motivos.
+
+Guias operacionais relacionados: [instalação no Proxmox](../INSTALAR_PROXMOX.md), [GPU Intel no Proxmox](../GPU_INTEL_PROXMOX.md) e [Podman](../USAR_PODMAN.md).

@@ -10,7 +10,7 @@ O MCP conecta o assistente às ferramentas da OMM. Depois da conexão, também e
    docker compose up -d
    ```
 
-   Se usar Podman, siga [Usar a OMM com Podman](technical/USAR_PODMAN.md).
+   Se usar Podman, siga [Usar a OMM com Podman](USAR_PODMAN.md).
 
 2. Cadastre `http://localhost:8000/mcp` no assistente que roda no mesmo computador.
 
@@ -78,7 +78,7 @@ OMM_EMBEDDING_TIMEOUT=120
 
 Se já usa o perfil `backup`, mantenha os dois: `COMPOSE_PROFILES=backup,semantic`. Depois, atualize a stack. Ela inicia o Ollama e baixa o modelo na primeira vez (cerca de 622 MB). A tarefa de instalação pode aparecer como concluída/parada no Portainer; isso é normal. O modelo fica em um volume separado e sobrevive a atualizações da aplicação. O Ollama fica com os recursos de nuvem desligados nesta stack.
 
-A OMM conversa com o Ollama por dentro da rede Docker. A porta 11434 não fica aberta para os outros computadores e os recursos de nuvem do Ollama ficam desligados. Por padrão, ele usa CPU; GPU não é necessária para começar. Para usar uma Intel Arc passada ao LXC, adicione `compose.intel-gpu.yaml` como arquivo adicional da stack no Portainer. Em LXC não privilegiado, o Proxmox também precisa mapear o grupo `render` do host para o LXC. Veja o [guia curto de GPU Intel no Proxmox](technical/GPU_INTEL_PROXMOX.md). Se o LXC estiver com pouca memória livre, confira o uso antes de aumentar o limite.
+A OMM conversa com o Ollama por dentro da rede Docker. A porta 11434 não fica aberta para os outros computadores e os recursos de nuvem do Ollama ficam desligados. Por padrão, ele usa CPU; GPU não é necessária para começar. Para usar uma Intel Arc passada ao LXC, adicione `compose.intel-gpu.yaml` como arquivo adicional da stack no Portainer. Em LXC não privilegiado, o Proxmox também precisa mapear o grupo `render` do host para o LXC. Veja o [guia curto de GPU Intel no Proxmox](GPU_INTEL_PROXMOX.md). Se o LXC estiver com pouca memória livre, confira o uso antes de aumentar o limite.
 
 Na primeira busca de cada escopo (global ou projeto), a OMM prepara os vetores daquele escopo e guarda os já preparados para os outros. Essa primeira preparação pode demorar; depois, ela reaproveita os vetores e só atualiza o que mudou. `OMM_EMBEDDING_TIMEOUT=120` dá ao Ollama até dois minutos para responder a cada lote, inclusive quando ele precisa carregar ou aquecer o modelo. Só a ferramenta `semantic_search` usa o Ollama; a busca normal continua local e não chama esse serviço. O texto das memórias e fontes é enviado ao Ollama local para gerar as comparações; não é enviado a um serviço externo por esta configuração. Se trocar o endereço por um serviço remoto, os textos sairão da sua rede. O modelo ocupa cerca de 622 MB e precisa de Ollama 0.11.10 ou mais recente ([detalhes do modelo](https://ollama.com/library/embeddinggemma)).
 
@@ -143,7 +143,7 @@ docker compose --profile backup run --rm --no-deps omm-backup \
   --from https://git.example.com/usuario/omm-dados.git --branch main
 ```
 
-Para uma instalação em servidor, veja o guia avançado [Instalar no Proxmox](technical/INSTALAR_PROXMOX.md).
+Para uma instalação em servidor, veja o guia avançado [Instalar no Proxmox](INSTALAR_PROXMOX.md).
 
 ## Segurança do painel
 
