@@ -52,6 +52,12 @@ A busca comum encontra palavras que aparecem na anotação. A busca semântica t
 
 Para fazer essa busca, a OMM usa o Ollama com o modelo `embeddinggemma`. O modelo transforma textos em números para comparar os assuntos. Ele não escreve respostas. A OMM continua sendo dona dos arquivos; o índice de busca pode ser recriado.
 
+```text
+Agente ── MCP ──> OMM ── rede privada ──> Ollama
+                                         ├─ CPU (padrão)
+                                         └─ Intel Arc via /dev/dri (opcional)
+```
+
 ### Ativar na stack Docker ou Portainer
 
 Na configuração da stack, junte `semantic` aos perfis que você já usa. Se também usa backup, por exemplo, fica `backup,semantic`. Adicione estas variáveis:
@@ -64,9 +70,9 @@ OMM_EMBEDDING_MODEL=embeddinggemma
 OMM_EMBEDDING_TIMEOUT=10
 ```
 
-Se já usa o perfil `backup`, mantenha os dois: `COMPOSE_PROFILES=backup,semantic`. Depois, atualize a stack. Ela inicia o Ollama e baixa o modelo na primeira vez (cerca de 622 MB). A tarefa de instalação pode aparecer como concluída/parada no Portainer; isso é normal. O modelo fica em um volume separado e sobrevive a atualizações da aplicação.
+Se já usa o perfil `backup`, mantenha os dois: `COMPOSE_PROFILES=backup,semantic`. Depois, atualize a stack. Ela inicia o Ollama e baixa o modelo na primeira vez (cerca de 622 MB). A tarefa de instalação pode aparecer como concluída/parada no Portainer; isso é normal. O modelo fica em um volume separado e sobrevive a atualizações da aplicação. O Ollama fica com os recursos de nuvem desligados nesta stack.
 
-A OMM conversa com o Ollama por dentro da rede Docker. A porta 11434 não fica aberta para os outros computadores. A configuração inicial usa CPU; GPU não é necessária para começar. Se o LXC estiver com pouca memória livre, confira o uso antes de aumentar o limite.
+A OMM conversa com o Ollama por dentro da rede Docker. A porta 11434 não fica aberta para os outros computadores e os recursos de nuvem do Ollama ficam desligados. Por padrão, ele usa CPU; GPU não é necessária para começar. Para usar uma Intel Arc passada ao LXC, adicione `compose.intel-gpu.yaml` como arquivo adicional da stack no Portainer e confirme que `/dev/dri` existe no LXC. O Ollama precisa receber esse dispositivo para detectar a GPU; a imagem oficial inclui o suporte Vulkan. Se o LXC estiver com pouca memória livre, confira o uso antes de aumentar o limite.
 
 O primeiro uso pode demorar enquanto a OMM prepara o índice. Depois, ela reaproveita o que não mudou. Só a ferramenta `semantic_search` usa o Ollama; a busca normal continua local e não chama esse serviço. O texto das memórias e fontes é enviado ao Ollama local para gerar as comparações; não é enviado a um serviço externo por esta configuração. Se trocar o endereço por um serviço remoto, os textos sairão da sua rede. A busca semântica pode ficar mais lenta em coleções muito grandes. O modelo ocupa cerca de 622 MB e precisa de Ollama 0.11.10 ou mais recente ([detalhes do modelo](https://ollama.com/library/embeddinggemma)).
 
@@ -80,6 +86,8 @@ Quando habilitada, o agente pode chamar `semantic_search` se a busca comum não 
 - `backup`: inicia o serviço que faz cópias no Git. Também é preciso `OMM_GIT_BACKUP_ENABLED=true`;
 - `semantic`: inicia Ollama e baixa o modelo de busca. Também é preciso `OMM_SEMANTIC_ENABLED=true`;
 - `backup,semantic`: inicia os dois extras.
+
+Para GPU Intel, mantenha esses perfis e adicione `compose.intel-gpu.yaml` em **Additional paths** da stack Git. Sem esse arquivo extra, a busca semântica usa CPU.
 
 Escreva o valor em `.env` ou nas variáveis da stack no Portainer. Se já usa `backup`, acrescente `,semantic`; não apague `backup`.
 

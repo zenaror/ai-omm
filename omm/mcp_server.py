@@ -199,7 +199,7 @@ def build_server(root: Path):
 
     @server.tool()
     def performance_report(repetitions: int = 5) -> dict:
-        """Mede tempos locais de busca, contexto e painel sem devolver conteúdo das memórias."""
+        """Mede operações locais sem devolver conteúdo; se habilitada e atual, faz até 3 buscas semânticas genéricas no Ollama."""
         return measure_performance(omm, repetitions)
 
     @server.tool()

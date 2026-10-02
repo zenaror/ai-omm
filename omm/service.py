@@ -311,10 +311,13 @@ class OMM:
             if self.semantic.indexed_fingerprint() != fingerprint:
                 self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root), fingerprint)
             count = max(0, min(int(limit), 10))
+            query_vector = None
+            if mode == "all" and count and query.strip() and scopes != []:
+                query_vector = self.semantic.embed_query(query)
             output: dict[str, list[dict]] = {"memories": [], "sources": []}
             if mode in {"all", "memory"}:
                 canonical = self._records_by_id()
-                for score, record_id in self.semantic.search_memories(query, count, scopes):
+                for score, record_id in self.semantic.search_memories(query, count, scopes, query_vector):
                     record = canonical.get(record_id)
                     if record:
                         output["memories"].append({"id": record.id, "kind": record.kind,
@@ -325,7 +328,7 @@ class OMM:
                 output["sources"] = [{"id": hit.id, "heading": hit.heading,
                     "content": hit.content[:1000], "source": hit.source,
                     "scope": hit.scope, "score": round(score, 4)}
-                    for score, hit in self.semantic.search_sources(query, count, scopes)]
+                    for score, hit in self.semantic.search_sources(query, count, scopes, query_vector)]
             return output
 
     def source_chunk_count(self) -> int:

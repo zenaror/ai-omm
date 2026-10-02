@@ -138,11 +138,13 @@ class OllamaSemanticIndex:
         return len(items)
 
     def _rank(self, query: str, kind: str, limit: int,
-              scopes: list[str] | None) -> list[tuple[float, tuple]]:
+              scopes: list[str] | None,
+              query_vector: list[float] | None = None) -> list[tuple[float, tuple]]:
         limit = max(0, min(int(limit), 100))
         if not query.strip() or limit == 0 or scopes == []:
             return []
-        query_vector = self._embed([query[:1200]])[0]
+        if query_vector is None:
+            query_vector = self._embed([query[:1200]])[0]
         with self._connect() as db:
             # Content is deliberately fetched only for final source hits. Loading
             # every chunk's text for ranking wastes memory on large collections.
@@ -169,13 +171,22 @@ class OllamaSemanticIndex:
         best.sort(key=lambda item: (-item[0], -item[1]))
         return [(score, row) for score, _, row in best]
 
+    def embed_query(self, query: str) -> list[float]:
+        """Create one query vector for reuse across memory and source searches."""
+        if not query.strip():
+            return []
+        return self._embed([query[:1200]])[0]
+
     def search_memories(self, query: str, limit: int = 5,
-                        scopes: list[str] | None = None) -> list[tuple[float, str]]:
-        return [(score, row[0]) for score, row in self._rank(query, "memory", limit, scopes)]
+                        scopes: list[str] | None = None,
+                        query_vector: list[float] | None = None) -> list[tuple[float, str]]:
+        return [(score, row[0]) for score, row in
+                self._rank(query, "memory", limit, scopes, query_vector)]
 
     def search_sources(self, query: str, limit: int = 5,
-                       scopes: list[str] | None = None) -> list[tuple[float, SourceHit]]:
-        ranked = self._rank(query, "source", limit, scopes)
+                       scopes: list[str] | None = None,
+                       query_vector: list[float] | None = None) -> list[tuple[float, SourceHit]]:
+        ranked = self._rank(query, "source", limit, scopes, query_vector)
         if not ranked:
             return []
         ids = [row[0] for _, row in ranked]

@@ -95,11 +95,25 @@ class OMMWorkflowTests(unittest.TestCase):
                                      "OMM_EMBEDDING_URL": "http://local.test/api/embed"}):
             semantic = OMM(self.root)
             with patch("omm.semantic.urlopen", side_effect=fake_embed):
+                before_report = len(embedded_batches)
+                stale_report = measure_performance(semantic, repetitions=2)
+                self.assertFalse(stale_report["semantic_index_current"])
+                self.assertNotIn("semantic_search", stale_report["measurements"])
+                self.assertEqual(len(embedded_batches), before_report,
+                                 "the report must not create a large semantic index")
                 result = semantic.semantic_search("coordinating shared projects", scopes=["demo"])
                 self.assertEqual(result["memories"][0]["title"], "Shared protocol")
                 self.assertEqual(result["sources"][0]["source"],
                                  "sources/demo/guide.md:2-2")
+                self.assertEqual(embedded_batches[-1], 1,
+                                 "one combined semantic search should embed its query only once")
                 self.assertGreater(semantic.semantic.chunk_count(), 0)
+                before_report = len(embedded_batches)
+                report = measure_performance(semantic, repetitions=2)
+                self.assertTrue(report["semantic_index_current"])
+                self.assertIn("semantic_search", report["measurements"])
+                self.assertEqual(embedded_batches[before_report:], [1, 1],
+                                 "the opt-in report should run only bounded generic queries")
                 calls_after_search = len(embedded_batches)
                 self.assertGreater(semantic.rebuild_semantic(), 0)
                 self.assertEqual(len(embedded_batches), calls_after_search,

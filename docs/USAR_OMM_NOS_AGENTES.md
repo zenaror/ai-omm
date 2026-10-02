@@ -41,4 +41,4 @@ A OMM pode descrever papéis e skills, mas não inicia outros agentes sozinha. O
 
 ## Medir o desempenho
 
-Peça ao agente: “Use `performance_report` da OMM e explique os tempos de busca, contexto e painel.” Ele mede a instalação conectada, sem mostrar o texto das memórias nem alterar os arquivos canônicos. O relatório é feito quando solicitado; não fica coletando dados continuamente. A busca semântica e o Ollama não são acionados.
+Peça ao agente: “Use `performance_report` da OMM e explique os tempos de busca, contexto e painel.” Ele mede a instalação conectada, sem mostrar o texto das memórias nem alterar os arquivos canônicos. O relatório é feito quando solicitado; não fica coletando dados continuamente. Se a busca semântica estiver habilitada e o índice atualizado, ele também faz até três buscas com uma pergunta genérica no serviço de embeddings. Não reconstrói um índice semântico desatualizado.

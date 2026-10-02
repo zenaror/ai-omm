@@ -101,7 +101,7 @@ OMM_EMBEDDING_MODEL=embeddinggemma
 OMM_EMBEDDING_TIMEOUT=10
 ```
 
-Na primeira subida, a stack baixa o modelo (cerca de 622 MB) para um volume que continua existindo após atualizações. O processamento começa pela CPU; não aumente a memória do LXC sem antes observar o uso. Se não quiser esse recurso, mantenha apenas `COMPOSE_PROFILES=backup` e `OMM_SEMANTIC_ENABLED=false`.
+Na primeira subida, a stack baixa o modelo (cerca de 622 MB) para um volume que continua existindo após atualizações. Por padrão, o processamento começa pela CPU. Para usar uma GPU Intel Arc disponível no LXC, inclua `compose.intel-gpu.yaml` como **Additional paths** na stack Git do Portainer; isso passa `/dev/dri` ao Ollama e ativa Vulkan. O LXC também precisa expor esse caminho. Se não quiser esse recurso, mantenha apenas `COMPOSE_PROFILES=backup` e `OMM_SEMANTIC_ENABLED=false`.
 
 Como o exemplo permite abrir o painel na rede, também configure um usuário e uma senha exclusivos para ele. Acrescente estas linhas ao mesmo `.env` e troque a senha de exemplo por uma senha longa que você não usa em outro lugar:
 

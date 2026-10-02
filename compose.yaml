@@ -54,6 +54,8 @@ services:
     profiles: ["semantic"]
     image: ollama/ollama:latest
     restart: unless-stopped
+    environment:
+      OLLAMA_NO_CLOUD: "1"
     volumes:
       - ollama-models:/root/.ollama
 
@@ -63,12 +65,16 @@ services:
     restart: "no"
     depends_on:
       - ollama
-    entrypoint: ["sh", "-c"]
-    command: >-
-      until curl -fsS http://ollama:11434/api/tags >/dev/null; do sleep 2; done;
-      curl -fsS http://ollama:11434/api/pull
-      -H 'Content-Type: application/json'
-      -d '{"model":"embeddinggemma","stream":false}'
+    entrypoint: ["/bin/sh"]
+    command:
+      - -ec
+      - |
+        until curl -fsS http://ollama:11434/api/tags >/dev/null; do
+          sleep 2
+        done
+        curl -fsS http://ollama:11434/api/pull \
+          -H 'Content-Type: application/json' \
+          -d '{"model":"embeddinggemma","stream":false}'
 
 volumes:
   omm-index:
