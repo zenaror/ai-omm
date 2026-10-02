@@ -5,6 +5,8 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import tempfile
+from threading import Event
+from time import monotonic
 import unittest
 from unittest.mock import patch
 
@@ -156,6 +158,44 @@ class OMMWorkflowTests(unittest.TestCase):
                 self.assertEqual(result, {"memories": [], "sources": []})
                 self.assertEqual(len(embedded_batches), calls_after_full_rebuild,
                                  "a zero result limit should not call the embedding service")
+
+    def test_mcp_semantic_search_builds_in_background_without_blocking_omm(self):
+        (self.root / "sources" / "demo").mkdir(parents=True)
+        (self.root / "sources" / "demo" / "guide.md").write_text(
+            "# Generic protocol\nA shared protocol helps projects coordinate.\n", encoding="utf-8")
+        started, finish = Event(), Event()
+
+        def slow_embed(request, timeout):
+            started.set()
+            if not finish.wait(2):
+                raise TimeoutError("test embedding gate timed out")
+            payload = json.loads(request.data)
+            return io.BytesIO(json.dumps({"embeddings": [[1.0, 0.0] for _ in payload["input"]]}).encode())
+
+        with patch.dict(os.environ, {"OMM_SEMANTIC_ENABLED": "true",
+                                     "OMM_EMBEDDING_URL": "http://local.test/api/embed"}):
+            semantic = OMM(self.root)
+            semantic.remember(MemoryRecord(kind="fact", title="Shared protocol",
+                content="Projects use one shared protocol.", source="guide.md", scope="demo"))
+            with patch("omm.semantic.urlopen", side_effect=slow_embed):
+                result = semantic.semantic_search_nonblocking("shared protocol", scopes=["demo"])
+                self.assertEqual(result["status"], "building")
+                self.assertTrue(started.wait(1))
+                self.assertEqual(semantic.semantic_index_status(["demo"])["status"], "building")
+                search_started = monotonic()
+                self.assertEqual(semantic.search("shared protocol", scopes=["demo"])[0].title,
+                                 "Shared protocol")
+                self.assertLess(monotonic() - search_started, 0.5,
+                                "semantic index generation must not hold the OMM data lock")
+                finish.set()
+                thread = semantic._semantic_job_thread
+                self.assertIsNotNone(thread)
+                thread.join(2)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(semantic.semantic_index_status(["demo"])["status"], "ready")
+                result = semantic.semantic_search_nonblocking("shared protocol", scopes=["demo"])
+                self.assertEqual(result["status"], "ready")
+                self.assertEqual(result["memories"][0]["title"], "Shared protocol")
 
     def test_web_dashboard_shows_usage_sources_and_can_archive_and_restore(self):
         record = MemoryRecord(kind="unknown", title="Cadência ainda desconhecida",

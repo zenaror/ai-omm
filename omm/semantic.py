@@ -6,6 +6,7 @@ import heapq
 import math
 from pathlib import Path
 import sqlite3
+from collections.abc import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -85,7 +86,8 @@ class OllamaSemanticIndex:
             return None
 
     def rebuild(self, records: list[MemoryRecord], chunks: list[SourceChunk], fingerprint: str,
-                scopes: list[str] | None = None) -> int:
+                scopes: list[str] | None = None,
+                progress: Callable[[int, int], None] | None = None) -> int:
         selected_scopes = None if scopes is None else set(scopes)
         items: list[tuple[str, str, str, str, str, str, int | None, int | None]] = []
         items.extend(("memory", record.id, record.scope, record.title,
@@ -129,11 +131,17 @@ class OllamaSemanticIndex:
                 vectors[position] = previous[1]
             else:
                 pending.append((position, item))
+        completed = len(items) - len(pending)
+        if progress is not None:
+            progress(completed, len(items))
         for offset in range(0, len(pending), 32):
             batch = pending[offset:offset + 32]
             embedded = self._embed([item[4] for _, item in batch])
             for (position, _), vector in zip(batch, embedded):
                 vectors[position] = vector
+            completed += len(batch)
+            if progress is not None:
+                progress(completed, len(items))
         if any(vector is None for vector in vectors):
             raise SemanticSearchError("O índice semântico ficou incompleto; tente reconstruí-lo novamente.")
         complete_vectors = [vector for vector in vectors if vector is not None]

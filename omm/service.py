@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-from threading import RLock
+from threading import Lock, RLock, Thread
 from time import monotonic
 import uuid
 
@@ -41,6 +41,9 @@ class OMM:
         self._index_file_signature: tuple[int, int, int] | None = None
         self._index_schema_valid = False
         self.semantic: OllamaSemanticIndex | None = None
+        self._semantic_job_lock = Lock()
+        self._semantic_job_state: dict[str, object] = {"status": "idle"}
+        self._semantic_job_thread: Thread | None = None
         if os.getenv("OMM_SEMANTIC_ENABLED", "false").strip().lower() in {"1", "true", "yes", "sim", "on"}:
             endpoint = os.getenv("OMM_EMBEDDING_URL", "").strip()
             model = os.getenv("OMM_EMBEDDING_MODEL", "embeddinggemma").strip()
@@ -298,6 +301,121 @@ class OMM:
             fingerprint = self._canonical_fingerprint()
             return self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root), fingerprint)
 
+    def _semantic_stale_scopes(self, fingerprint: str, scopes: list[str] | None) -> list[str] | None:
+        assert self.semantic is not None
+        if scopes is None:
+            return None if self.semantic.indexed_fingerprint() != fingerprint else []
+        return sorted({scope for scope in scopes
+                       if self.semantic.indexed_fingerprint(scope) != fingerprint})
+
+    def _semantic_query_current(self, query: str, mode: str, limit: int,
+                                scopes: list[str] | None) -> dict[str, list[dict]]:
+        """Run retrieval while the caller holds the OMM operation lock."""
+        assert self.semantic is not None
+        count = max(0, min(int(limit), 10))
+        query_vector = None
+        if mode == "all" and count and query.strip() and scopes != []:
+            query_vector = self.semantic.embed_query(query)
+        output: dict[str, list[dict]] = {"memories": [], "sources": []}
+        if mode in {"all", "memory"}:
+            canonical = self._records_by_id()
+            for score, record_id in self.semantic.search_memories(query, count, scopes, query_vector):
+                record = canonical.get(record_id)
+                if record:
+                    output["memories"].append({"id": record.id, "kind": record.kind,
+                        "title": record.title, "content": record.content[:600],
+                        "source": record.source, "scope": record.scope,
+                        "confidence": record.confidence, "score": round(score, 4)})
+        if mode in {"all", "sources"}:
+            output["sources"] = [{"id": hit.id, "heading": hit.heading,
+                "content": hit.content[:1000], "source": hit.source,
+                "scope": hit.scope, "score": round(score, 4)}
+                for score, hit in self.semantic.search_sources(query, count, scopes, query_vector)]
+        return output
+
+    def _start_semantic_rebuild(self, scopes: list[str] | None) -> dict[str, object]:
+        assert self.semantic is not None
+        with self._semantic_job_lock:
+            if self._semantic_job_state.get("status") == "building":
+                return dict(self._semantic_job_state)
+            self._semantic_job_state = {
+                "status": "building", "scopes": scopes, "completed": 0,
+                "total": None, "started_at": datetime.now(timezone.utc).isoformat(),
+                "error_type": None,
+            }
+
+            def update_progress(completed: int, total: int) -> None:
+                with self._semantic_job_lock:
+                    self._semantic_job_state["completed"] = completed
+                    self._semantic_job_state["total"] = total
+
+            def run() -> None:
+                try:
+                    # Snapshot canonical inputs briefly, then release the shared
+                    # data lock before the slow network/GPU embedding batches.
+                    with self.operation_lock():
+                        self._ensure_index_current()
+                        fingerprint = self._canonical_fingerprint()
+                        current_scopes = self._semantic_stale_scopes(fingerprint, scopes)
+                        if current_scopes == []:
+                            with self._semantic_job_lock:
+                                self._semantic_job_state.update(status="ready", completed=0, total=0)
+                            return
+                        records = list(self.store.records())
+                        chunks = read_source_chunks(self.root)
+                    self.semantic.rebuild(records, chunks, fingerprint, current_scopes, update_progress)
+                except Exception as exc:  # status carries a safe class name, not endpoint details
+                    with self._semantic_job_lock:
+                        self._semantic_job_state.update(status="failed", error_type=type(exc).__name__)
+                else:
+                    with self._semantic_job_lock:
+                        self._semantic_job_state.update(status="ready", error_type=None)
+
+            thread = Thread(target=run, name="omm-semantic-index", daemon=True)
+            self._semantic_job_thread = thread
+            state = dict(self._semantic_job_state)
+        thread.start()
+        return state
+
+    def semantic_index_status(self, scopes: list[str] | None = None) -> dict[str, object]:
+        """Report semantic index state without waiting for an embedding job."""
+        if self.semantic is None:
+            return {"enabled": False, "status": "disabled", "indexed_entries": 0}
+        with self._semantic_job_lock:
+            job = dict(self._semantic_job_state)
+        if job.get("status") == "building":
+            return {"enabled": True, **job, "indexed_entries": self.semantic.chunk_count()}
+        with self.operation_lock():
+            fingerprint = self._canonical_fingerprint()
+            current = (self.semantic.indexed_fingerprint() == fingerprint if scopes is None else
+                       all(self.semantic.indexed_fingerprint(scope) == fingerprint for scope in scopes))
+            entries = self.semantic.chunk_count()
+        status = "ready" if current else ("failed" if job.get("status") == "failed" else "stale")
+        return {"enabled": True, "status": status, "scopes": scopes,
+                "indexed_entries": entries, "error_type": job.get("error_type")}
+
+    def semantic_search_nonblocking(self, query: str, mode: str = "all", limit: int = 5,
+                                    scopes: list[str] | None = None) -> dict[str, object]:
+        """MCP-friendly search that starts a cold index build without holding a request open."""
+        if self.semantic is None:
+            raise SemanticSearchError("Busca semântica desligada. Configure OMM_SEMANTIC_ENABLED=true e reinicie a OMM.")
+        if mode not in {"all", "memory", "sources"}:
+            raise ValueError("mode precisa ser all, memory ou sources.")
+        with self.operation_lock():
+            self._ensure_index_current()
+            fingerprint = self._canonical_fingerprint()
+            stale_scopes = self._semantic_stale_scopes(fingerprint, scopes)
+            if stale_scopes == []:
+                return {"status": "ready", **self._semantic_query_current(query, mode, limit, scopes)}
+        job = self._start_semantic_rebuild(stale_scopes)
+        state = str(job.get("status", "building"))
+        message = ("O índice semântico está sendo preparado. Use semantic_index_status para acompanhar; "
+                   "a busca lexical continua disponível. Tente semantic_search novamente quando o estado for ready.")
+        if state == "building" and job.get("scopes") != stale_scopes:
+            message = ("Outra reconstrução semântica está em andamento. Aguarde o estado ready e tente "
+                       "semantic_search novamente para este escopo.")
+        return {"status": state, "index_status": job, "memories": [], "sources": [], "message": message}
+
     def semantic_search(self, query: str, mode: str = "all", limit: int = 5,
                         scopes: list[str] | None = None) -> dict[str, list[dict]]:
         """Search by meaning only when explicitly requested by the caller."""
@@ -308,34 +426,11 @@ class OMM:
         with self.operation_lock():
             self._ensure_index_current()
             fingerprint = self._canonical_fingerprint()
-            if scopes is None:
-                stale_scopes = None if self.semantic.indexed_fingerprint() != fingerprint else []
-            else:
-                stale_scopes = sorted({scope for scope in scopes
-                                       if self.semantic.indexed_fingerprint(scope) != fingerprint})
+            stale_scopes = self._semantic_stale_scopes(fingerprint, scopes)
             if stale_scopes is None or stale_scopes:
                 self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root),
                                       fingerprint, stale_scopes)
-            count = max(0, min(int(limit), 10))
-            query_vector = None
-            if mode == "all" and count and query.strip() and scopes != []:
-                query_vector = self.semantic.embed_query(query)
-            output: dict[str, list[dict]] = {"memories": [], "sources": []}
-            if mode in {"all", "memory"}:
-                canonical = self._records_by_id()
-                for score, record_id in self.semantic.search_memories(query, count, scopes, query_vector):
-                    record = canonical.get(record_id)
-                    if record:
-                        output["memories"].append({"id": record.id, "kind": record.kind,
-                            "title": record.title, "content": record.content[:600],
-                            "source": record.source, "scope": record.scope,
-                            "confidence": record.confidence, "score": round(score, 4)})
-            if mode in {"all", "sources"}:
-                output["sources"] = [{"id": hit.id, "heading": hit.heading,
-                    "content": hit.content[:1000], "source": hit.source,
-                    "scope": hit.scope, "score": round(score, 4)}
-                    for score, hit in self.semantic.search_sources(query, count, scopes, query_vector)]
-            return output
+            return self._semantic_query_current(query, mode, limit, scopes)
 
     def source_chunk_count(self) -> int:
         with self.operation_lock():

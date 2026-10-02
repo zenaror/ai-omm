@@ -5,6 +5,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+from typing import Literal
 
 from .models import MemoryRecord
 from .service import OMM
@@ -30,7 +31,8 @@ def build_server(root: Path):
         instructions=(
             "Use context para um resumo curto no escopo do projeto e inclua global só quando ajudar. "
             "Contexto não inclui documentos-fonte por padrão; use search_sources quando precisar conferir a origem. "
-            "Use semantic_search apenas quando busca por significado for útil e estiver habilitada; ela pode chamar o serviço de embeddings configurado. "
+            "Use semantic_search apenas quando busca por significado for útil e estiver habilitada. Os modos válidos são all, memory e sources. "
+            "Se retornar status=building, use semantic_index_status para acompanhar; a busca lexical continua disponível durante a preparação. "
             "Use list_skills/list_roles para ver opções e abra só a skill ou papel necessário com get_skill/get_role. "
             "Para sugerir uma memória nova, use propose_memory: a pessoa revisa no painel, junto com possíveis semelhantes. "
             "Use remember só quando a pessoa pedir para salvar diretamente. Ao atualizar algo, marque a antiga como superseded. "
@@ -125,12 +127,20 @@ def build_server(root: Path):
 
     @server.tool()
     def semantic_search(query: str, scope: str = "global", include_global: bool = True,
-                        limit: int = 5, mode: str = "all") -> dict:
-        """Busca por significado usando o serviço de embeddings opcional configurado."""
+                        limit: int = 5, mode: Literal["all", "memory", "sources"] = "all") -> dict:
+        """Busca semântica; mode: all, memory ou sources. Ao preparar o índice, retorna status=building sem esperar o serviço de embeddings."""
         scopes = [scope]
         if include_global and scope != "global":
             scopes.insert(0, "global")
-        return omm.semantic_search(query, mode, min(max(int(limit), 0), 5), scopes)
+        return omm.semantic_search_nonblocking(query, mode, min(max(int(limit), 0), 5), scopes)
+
+    @server.tool()
+    def semantic_index_status(scope: str = "global", include_global: bool = True) -> dict:
+        """Confere se os vetores estão prontos ou acompanha a reconstrução semântica em andamento."""
+        scopes = [scope]
+        if include_global and scope != "global":
+            scopes.insert(0, "global")
+        return omm.semantic_index_status(scopes)
 
     @server.tool()
     def read_source(path: str, start_line: int, end_line: int) -> dict:

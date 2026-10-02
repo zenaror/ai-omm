@@ -91,6 +91,8 @@ Busca semântica é opt-in (`OMM_SEMANTIC_ENABLED=true`) e usa endpoint de embed
 
 Os escopos são barreiras de recuperação. Uma chamada limitada a um projeto pode consultar somente aquele escopo, ou combiná-lo com `global`. O índice registra fingerprints por escopo. Quando uma consulta semântica pede escopos explícitos, apenas esses escopos (e `global`, se solicitado pelo chamador) são comparados com o fingerprint e reconstruídos se necessário. Vetores de outros escopos são preservados. Uma reconstrução explícita sem filtro, como `omm semantic-rebuild`, cobre o corpus inteiro.
 
+Na interface MCP, a geração de vetores desatualizados roda em segundo plano para não prender a chamada por minutos nem bloquear as demais operações da OMM. Nesse primeiro pedido, `semantic_search` retorna `status=building`, sem resultados semânticos; `semantic_index_status` mostra o progresso em lotes. O agente pode usar a busca lexical enquanto espera e repetir a consulta quando o estado for `ready`. O CLI mantém a reconstrução explícita síncrona.
+
 Cada vetor armazenado já está normalizado; o produto interno equivale à similaridade de cosseno. A implementação varre linearmente os vetores do tipo e escopo pedidos, usando um heap limitado a `k` itens para manter os melhores resultados. Assim, textos completos dos candidatos não são carregados todos na memória e não é necessário ordenar todo o conjunto, embora o custo de comparação continue O(N·d), onde N é o número de vetores no escopo e d a dimensão. Uma coleção muito grande poderá justificar índice ANN (por exemplo, HNSW), sem mudar a fonte canônica.
 
 `OMM_EMBEDDING_TIMEOUT` limita cada chamada ao serviço, com padrão de 120 segundos e teto interno também limitado. Os vetores dependem do modelo e do conteúdo; trocar o modelo invalida a identidade do índice semântico. Remover `.omm/index.sqlite3` elimina os vetores, não os dados. Uma nova busca ou `semantic-rebuild` os calcula novamente. Na configuração Compose, o Ollama permanece numa rede interna, com cloud desligada; textos são enviados ao endpoint configurado, então apontá-lo para outro host muda o limite de privacidade.
@@ -106,7 +108,7 @@ Cada vetor armazenado já está normalizado; o produto interno equivale à simil
 `omm/mcp_server.py` expõe ferramentas MCP para:
 
 - leitura/gravação e revisão: `remember`, `propose_memory`, `list_memory_proposals`, `search`, `get_memory`, `set_memory_status`;
-- retrieval e fontes: `search_sources`, `semantic_search`, `read_source`, `context`, `rebuild_index`;
+- retrieval e fontes: `search_sources`, `semantic_search`, `semantic_index_status`, `read_source`, `context`, `rebuild_index`;
 - coordenação e diagnóstico: `handoff`, `status`, `diagnose_setup`, `performance_report`;
 - extensões declarativas: `list_skills`, `get_skill`, `list_roles`, `get_role`, `get_agent_topology`.
 

@@ -23,7 +23,7 @@ Copie o texto abaixo para o `AGENTS.md` do seu projeto. Troque `meu-projeto` pel
 Este projeto usa a OMM. Quando o histórico ou decisões anteriores forem importantes:
 
 - Comece com `context` no escopo `meu-projeto`; inclua `global` só quando ajudar. O resumo é curto e não abre documentos-fonte automaticamente.
-- Use `search` primeiro. Se não achar algo que parece estar guardado e a busca semântica estiver ligada, tente `semantic_search`; ela procura pelo assunto mesmo quando as palavras mudam. Confira a origem antes de tratar o resultado como fato.
+- Use `search` primeiro. Se não achar algo que parece estar guardado e a busca semântica estiver ligada, tente `semantic_search`; ela procura pelo assunto mesmo quando as palavras mudam. Os modos aceitos são `all`, `memory` e `sources`. Na primeira consulta, a OMM pode preparar o índice e responder `status=building`; acompanhe com `semantic_index_status` e tente de novo quando estiver pronto. Enquanto isso, use a busca lexical normal. Confira a origem antes de tratar o resultado como fato.
 - Se precisar conferir um documento, use `search_sources` e depois `read_source` para abrir somente o trecho relevante.
 - Use `list_skills`/`list_roles` para ver resumos e `get_skill`/`get_role` para abrir só o item escolhido.
 - Antes de guardar algo, use `search` para evitar duplicatas. Sugira novas anotações com `propose_memory`; a pessoa pode revisar e comparar possíveis semelhantes no painel. Use `remember` só quando a pessoa pedir para salvar diretamente. Se uma decisão mudou, registre a nova e marque a anterior como `superseded` com `set_memory_status`.
