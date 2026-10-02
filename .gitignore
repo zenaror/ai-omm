@@ -1,0 +1,9 @@
+.omm/
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.omm-backup/
+/omm-data/
+/memory/
+/skills/

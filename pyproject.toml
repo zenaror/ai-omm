@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-omm"
+version = "0.1.0"
+description = "Memória de projeto compartilhada entre assistentes, portável por Git"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=2,<3"]
+backup = ["croniter>=2,<7"]
+
+[project.scripts]
+omm = "omm.cli:main"
+
+[tool.setuptools]
+packages = ["omm"]
+
+[tool.setuptools.package-data]
+omm = ["web/*.html", "web/*.css", "web/*.js"]

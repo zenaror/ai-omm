@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+.venv
+__pycache__
+*.py[cod]
+.omm
+.omm-backup
+omm-data
+memory
+skills
+sources
+tests
+docs

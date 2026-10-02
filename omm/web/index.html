@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OMM · Memórias</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="OMM início"><span class="brand-mark">O</span><span>Minha memória OMM</span></a>
+    <span class="local-label"><span class="dot"></span> seus arquivos, sob seu controle</span>
+  </header>
+  <main>
+    <section class="welcome">
+      <div>
+        <p class="eyebrow">CADERNO COMPARTILHADO</p>
+        <h1>Olá! O que você quer lembrar?</h1>
+        <p>Veja o que foi guardado, de onde veio e quais ajudantes e skills cada projeto usa.</p>
+      </div>
+      <div class="welcome-actions">
+        <button class="refresh-button" id="sync" type="button" aria-label="Sincronizar backup">⇄ <span>Sincronizar backup</span></button>
+        <button class="refresh-button" id="refresh" type="button" aria-label="Atualizar">↻ <span>Atualizar</span></button>
+      </div>
+    </section>
+
+    <section class="stats" aria-label="Resumo da memória">
+      <article class="stat-card"><span class="stat-icon lavender">✎</span><div><strong id="active-count">—</strong><span>anotações ativas</span></div></article>
+      <article class="stat-card"><span class="stat-icon peach">?</span><div><strong id="unknown-count">—</strong><span>dúvidas em aberto</span></div></article>
+      <article class="stat-card"><span class="stat-icon mint">▤</span><div><strong id="memory-size">—</strong><span>memórias, skills e fontes</span></div></article>
+      <article class="stat-card"><span class="stat-icon blue">✦</span><div><strong id="skill-count">—</strong><span>skills disponíveis</span></div></article>
+    </section>
+    <p class="small-note">O espaço é o tamanho dos arquivos guardados. Ele não mede a cota ou o uso do seu assistente de IA.</p>
+    <p id="health" class="small-note" role="status">Verificando estado da busca e do backup…</p>
+    <p class="small-note">“Sincronizar backup” salva suas alterações, busca as novidades do Git e envia o resultado. Se houver conflito, uma cópia local fica guardada em <code>memory/imports/sync-recovery</code>.</p>
+
+    <section class="panel">
+      <div class="section-heading"><div><p class="eyebrow">MEMÓRIA</p><h2>Anotações dos projetos</h2><p>Busque por assunto e confira a fonte antes de usar uma informação.</p></div></div>
+      <div class="filters">
+        <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Ex.: decisão sobre o protocolo" autocomplete="off"></label>
+        <label class="select-label"><span>Projeto</span><select id="scope"><option value="">Todos</option></select></label>
+        <label class="check-label"><input id="archived" type="checkbox"><span>Mostrar removidas</span></label>
+      </div>
+      <div id="records" class="record-list" aria-live="polite"></div>
+      <p id="record-limit" class="small-note hidden">Mostrando até 200 anotações. Use a busca para encontrar outras.</p>
+    </section>
+
+    <section id="sources-panel" class="panel hidden" aria-live="polite">
+      <div class="section-heading"><div><p class="eyebrow">DOCUMENTOS-FONTE</p><h2>Trechos para consultar</h2><p>As linhas ajudam a encontrar a fonte original guardada na OMM.</p></div></div>
+      <div id="sources" class="source-list"></div>
+    </section>
+
+    <div class="two-columns">
+      <section class="panel compact-panel"><div class="section-heading"><div><p class="eyebrow">CONTINUIDADE</p><h2>Última passagem de trabalho</h2></div></div><div id="handoff" class="empty">Nenhuma passagem para este projeto.</div></section>
+      <section class="panel compact-panel"><div class="section-heading"><div><p class="eyebrow">ORIENTAÇÕES</p><h2>Regras importantes</h2></div></div><div id="policies" class="policy-list"><p class="empty">Nenhuma regra cadastrada ainda.</p></div></section>
+    </div>
+
+    <section class="panel compact-panel">
+      <div class="section-heading"><div><p class="eyebrow">ORGANIZAÇÃO</p><h2>Como este projeto está montado</h2><p>Escolha um projeto no filtro acima para revisar seus agentes, skills e documentos.</p></div></div>
+      <div id="organization-summary" class="organization-summary"><p class="empty">Escolha um projeto no filtro acima.</p></div>
+      <div class="organization-grid">
+        <section><h3>Agentes e papéis</h3><div id="agents" class="skill-list"></div></section>
+        <section><h3>Skills aplicáveis</h3><div id="skills" class="skill-list"></div></section>
+        <section><h3>Conhecimento compartilhado</h3><div id="shared-knowledge" class="skill-list"></div></section>
+        <section><h3>Materiais disponíveis</h3><div id="project-sources"></div></section>
+      </div>
+    </section>
+    <footer>As anotações ficam nos arquivos da OMM. A busca é um índice que pode ser recriado sem perder a memória.</footer>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

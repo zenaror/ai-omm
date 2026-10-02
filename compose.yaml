@@ -1,0 +1,48 @@
+services:
+  omm:
+    build: .
+    restart: unless-stopped
+    environment:
+      OMM_GIT_BACKUP_RESTORE: ${OMM_GIT_BACKUP_RESTORE:-true}
+      OMM_GIT_BACKUP_REMOTE: ${OMM_GIT_BACKUP_REMOTE:-origin}
+      OMM_GIT_BACKUP_REPOSITORY_URL: ${OMM_GIT_BACKUP_REPOSITORY_URL:-}
+      OMM_GIT_BACKUP_BRANCH: ${OMM_GIT_BACKUP_BRANCH:-main}
+      OMM_GIT_BACKUP_USERNAME: ${OMM_GIT_BACKUP_USERNAME:-}
+      OMM_GIT_BACKUP_TOKEN: ${OMM_GIT_BACKUP_TOKEN:-}
+      OMM_GIT_BACKUP_AUTHOR_NAME: ${OMM_GIT_BACKUP_AUTHOR_NAME:-OMM Backup}
+      OMM_GIT_BACKUP_AUTHOR_EMAIL: ${OMM_GIT_BACKUP_AUTHOR_EMAIL:-omm@localhost}
+      OMM_WEB_ENABLED: ${OMM_WEB_ENABLED:-true}
+      OMM_WEB_PORT: 8001
+      OMM_WEB_USERNAME: ${OMM_WEB_USERNAME:-omm}
+      OMM_WEB_PASSWORD: ${OMM_WEB_PASSWORD:-}
+    ports:
+      - "${OMM_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+      - "${OMM_BIND_ADDRESS:-127.0.0.1}:8001:8001"
+    volumes:
+      # Os arquivos abaixo continuam visíveis e versionáveis pelo Git do host.
+      - ${OMM_DATA_PATH:-./omm-data}:/data
+      # O índice é temporário e pode ser apagado/recriado sem perder memória.
+      - omm-index:/data/.omm
+
+  omm-backup:
+    profiles: ["backup"]
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "omm.backup_worker", "--root", "/data"]
+    environment:
+      OMM_GIT_BACKUP_ENABLED: ${OMM_GIT_BACKUP_ENABLED:-false}
+      OMM_GIT_BACKUP_SCHEDULE: ${OMM_GIT_BACKUP_SCHEDULE:-0 3 * * *}
+      OMM_GIT_BACKUP_TIMEZONE: ${OMM_GIT_BACKUP_TIMEZONE:-America/Sao_Paulo}
+      OMM_GIT_BACKUP_REMOTE: ${OMM_GIT_BACKUP_REMOTE:-origin}
+      OMM_GIT_BACKUP_REPOSITORY_URL: ${OMM_GIT_BACKUP_REPOSITORY_URL:-}
+      OMM_GIT_BACKUP_BRANCH: ${OMM_GIT_BACKUP_BRANCH:-main}
+      OMM_GIT_BACKUP_PUSH: ${OMM_GIT_BACKUP_PUSH:-false}
+      OMM_GIT_BACKUP_USERNAME: ${OMM_GIT_BACKUP_USERNAME:-x-access-token}
+      OMM_GIT_BACKUP_TOKEN: ${OMM_GIT_BACKUP_TOKEN:-}
+      OMM_GIT_BACKUP_AUTHOR_NAME: ${OMM_GIT_BACKUP_AUTHOR_NAME:-OMM Backup}
+      OMM_GIT_BACKUP_AUTHOR_EMAIL: ${OMM_GIT_BACKUP_AUTHOR_EMAIL:-omm@localhost}
+    volumes:
+      - ${OMM_DATA_PATH:-./omm-data}:/data
+
+volumes:
+  omm-index:
