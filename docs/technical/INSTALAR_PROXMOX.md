@@ -98,10 +98,10 @@ COMPOSE_PROFILES=backup,semantic
 OMM_SEMANTIC_ENABLED=true
 OMM_EMBEDDING_URL=http://ollama:11434/api/embed
 OMM_EMBEDDING_MODEL=embeddinggemma
-OMM_EMBEDDING_TIMEOUT=10
+OMM_EMBEDDING_TIMEOUT=120
 ```
 
-Na primeira subida, a stack baixa o modelo (cerca de 622 MB) para um volume que continua existindo após atualizações. Por padrão, o processamento começa pela CPU. Para usar uma GPU Intel Arc disponível no LXC, inclua `compose.intel-gpu.yaml` como **Additional paths** na stack Git do Portainer. Em LXC não privilegiado, também é preciso mapear o grupo `render`. Siga o [guia curto para GPU Intel no Proxmox](GPU_INTEL_PROXMOX.md). Se não quiser GPU, não inclua o arquivo adicional.
+Na primeira subida, a stack baixa o modelo (cerca de 622 MB) para um volume que continua existindo após atualizações. A primeira busca semântica prepara o índice e pode demorar; `OMM_EMBEDDING_TIMEOUT=120` dá até dois minutos para cada lote do Ollama responder. Por padrão, o processamento começa pela CPU. Para usar uma GPU Intel Arc disponível no LXC, inclua `compose.intel-gpu.yaml` como **Additional paths** na stack Git do Portainer. Em LXC não privilegiado, também é preciso mapear o grupo `render`. Siga o [guia curto para GPU Intel no Proxmox](GPU_INTEL_PROXMOX.md). Se não quiser GPU, não inclua o arquivo adicional.
 
 Como o exemplo permite abrir o painel na rede, também configure um usuário e uma senha exclusivos para ele. Acrescente estas linhas ao mesmo `.env` e troque a senha de exemplo por uma senha longa que você não usa em outro lugar:
 

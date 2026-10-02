@@ -30,7 +30,7 @@ Guarde informações que ajudam o próximo trabalho: decisões, descobertas, reg
 
 Não copie conversas inteiras sem revisão. Uma conversa pode misturar fatos, ideias temporárias e instruções que só valiam naquele momento. Selecione o que continua útil e mantenha uma referência à conversa original.
 
-Também não transforme uma dúvida em certeza. O OMM permite indicar se algo é fato, observação, hipótese, decisão, regra ou pergunta em aberto. Esses nomes aparecem em inglês nos comandos, mas seus significados são explicados no [README](README.md).
+Também não transforme uma dúvida em certeza. O OMM permite indicar se algo é fato, observação, hipótese, decisão, regra ou pergunta em aberto. Esses nomes aparecem em inglês nos comandos, mas seus significados são explicados no [README](../README.md).
 
 ## Exemplo
 

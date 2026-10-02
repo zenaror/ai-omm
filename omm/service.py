@@ -49,7 +49,7 @@ class OMM:
             if not model:
                 raise ValueError("OMM_EMBEDDING_MODEL não pode ficar vazio.")
             try:
-                timeout = float(os.getenv("OMM_EMBEDDING_TIMEOUT", "10"))
+                timeout = float(os.getenv("OMM_EMBEDDING_TIMEOUT", "120"))
             except ValueError as exc:
                 raise ValueError("OMM_EMBEDDING_TIMEOUT precisa ser um número de segundos.") from exc
             self.semantic = OllamaSemanticIndex(self.root / ".omm" / "index.sqlite3", endpoint, model, timeout)

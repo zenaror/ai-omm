@@ -45,7 +45,7 @@ docker compose up -d
 
 Depois, configure o assistente para acessar `http://localhost:8000/mcp` e diga a ele quando consultar e atualizar a memória. Só conectar não faz o assistente usar a OMM automaticamente.
 
-Siga o guia [Como usar a OMM nos agentes](docs/USAR_OMM_NOS_AGENTES.md). Para instruções de conexão, consulte [Ligar um assistente](docs/USAR_MCP.md). Também há guias para [Podman](docs/USAR_PODMAN.md) e [o painel web](docs/PAINEL_WEB.md).
+Siga o guia [Como usar a OMM nos agentes](docs/USAR_OMM_NOS_AGENTES.md). Para instruções de conexão, consulte [Ligar um assistente](docs/USAR_MCP.md). Também há guias para [Podman](docs/technical/USAR_PODMAN.md) e [o painel web](docs/PAINEL_WEB.md).
 
 Por padrão, a OMM usa busca textual local. A busca semântica é opcional: em vez de exigir as mesmas palavras, ela tenta encontrar o mesmo assunto. Na stack Docker, o perfil opcional `semantic` inicia o Ollama e baixa um modelo pequeno para essa tarefa. Veja [como ativar](docs/USAR_MCP.md#busca-semântica-procurar-pelo-assunto). Agentes podem sugerir memórias para aprovação no painel.
 
@@ -66,4 +66,4 @@ O backup em Git é opcional. Pode ficar apenas no computador ou ser enviado a Gi
 - **Skill:** instruções para ajudar o assistente em um assunto ou tarefa.
 - **RAG:** busca de trechos em documentos. Na OMM, os arquivos são a referência; a busca só ajuda a encontrá-los.
 
-Veja [MIGRATION.md](MIGRATION.md) para trazer dados existentes. As escolhas técnicas estão em [docs/DECISOES.md](docs/DECISOES.md); a instalação em servidor está no guia avançado [Proxmox](docs/INSTALAR_PROXMOX.md).
+Veja [Como migrar informações](docs/MIGRATION.md) para trazer dados existentes. Para configurações avançadas e decisões técnicas, consulte o [material técnico](docs/technical/README.md).

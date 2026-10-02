@@ -61,6 +61,14 @@ class OMMWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.omm.remember(MemoryRecord(kind="guess", title="x", content="y", source="z"))
 
+    def test_semantic_embedding_timeout_defaults_to_two_minutes(self):
+        with patch.dict(os.environ, {
+            "OMM_SEMANTIC_ENABLED": "true",
+            "OMM_EMBEDDING_URL": "http://ollama:11434/api/embed",
+        }, clear=True):
+            configured = OMM(self.root)
+        self.assertEqual(configured.semantic.timeout, 120.0)
+
     def test_memory_proposal_can_be_reviewed_and_approved_once(self):
         original = MemoryRecord(kind="fact", title="Shared example protocol",
                                 content="A generic protocol is shared.", source="guide.md", scope="demo")
