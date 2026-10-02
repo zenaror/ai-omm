@@ -18,6 +18,7 @@ from omm.claude_archive import import_claude_session
 from omm.backup_worker import BackupError, backup_once
 from omm.restore import RestoreError, resolve_restore_source, restore_from_git, restore_on_start
 from omm.web_server import dashboard_data
+from omm.performance import measure_performance
 from omm.sync import sync_with_backup
 
 
@@ -168,6 +169,21 @@ class OMMWorkflowTests(unittest.TestCase):
         self.assertEqual(deleted.id, record.id)
         self.assertEqual(list(self.omm.store.records()), [])
         self.assertEqual(self.omm.search("Cadência desconhecida"), [])
+
+    def test_performance_report_is_read_only_and_omits_memory_content(self):
+        record = MemoryRecord(kind="fact", title="Private synthetic phrase",
+                              content="This content must not appear in a performance report.",
+                              source="fixture.md", scope="benchmark")
+        self.omm.remember(record)
+        before = self.omm.store.records_path.read_bytes()
+        report = measure_performance(self.omm, repetitions=2)
+        after = self.omm.store.records_path.read_bytes()
+        self.assertEqual(before, after)
+        self.assertTrue(report["read_only"])
+        self.assertTrue(report["index_current"])
+        self.assertIn("search", report["measurements"])
+        self.assertIn("context", report["measurements"])
+        self.assertNotIn(record.content, json.dumps(report))
 
     def test_shared_scope_is_searchable_alongside_project_scope(self):
         self.omm.remember(MemoryRecord(kind="fact", title="example-domain protocol", content="Shared example-domain protocol detail.",

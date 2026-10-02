@@ -38,3 +38,7 @@ Peça ao assistente: “Sem alterar nada, confirme se vê as ferramentas da OMM 
 ## Ajudantes e subagentes
 
 A OMM pode descrever papéis e skills, mas não inicia outros agentes sozinha. O assistente principal precisa escolher e chamar ajudantes, e o aplicativo usado precisa oferecer essa função. Para tarefas simples, um único agente pode cuidar de tudo.
+
+## Medir o desempenho
+
+Peça ao agente: “Use `performance_report` da OMM e explique os tempos de busca, contexto e painel.” Ele mede a instalação conectada, sem mostrar o texto das memórias nem alterar os arquivos canônicos. O relatório é feito quando solicitado; não fica coletando dados continuamente. A busca semântica e o Ollama não são acionados.
