@@ -268,7 +268,17 @@ def build_server(root: Path):
 
     @server.tool()
     def get_agent_topology(scope: str | None = None) -> dict:
-        """Mostra quais ajudantes existem e quando um projeto os aciona."""
+        """Consulta o mapa de agentes e as regras de encaminhamento do projeto.
+
+        Use este mapa no início de uma tarefa quando houver papéis especializados.
+        Ele descreve quem coordena, quais ajudantes existem, quando cada um se
+        aplica e que conhecimento é compartilhado. Abra somente os papéis
+        relevantes com get_role e as skills compartilhadas com get_skill.
+
+        A OMM não cria nem executa subagentes. O agente coordenador deve usar a
+        função nativa de subagentes do seu próprio aplicativo. Se o aplicativo
+        não oferecer essa função, explique a limitação e continue na sessão
+        central sem afirmar que ajudantes foram iniciados."""
         topology = load_topology(omm.root)
         profiles = topology.get("project_profiles", {})
         if scope:
