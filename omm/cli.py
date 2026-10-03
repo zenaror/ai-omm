@@ -13,7 +13,7 @@ from .history import accept_history, list_history_imports, show_history_import, 
 from .copilot_archive import import_copilot_chat
 from .claude_archive import import_claude_session
 from .restore import RestoreError, restore_from_git
-from .sync import SyncError, sync_with_backup
+from .sync import SyncError, preview_sync, sync_with_backup_report
 from .backup_worker import BackupError
 
 
@@ -73,7 +73,10 @@ def parser() -> argparse.ArgumentParser:
     restore = sub.add_parser("restore", help="restaurar a memória a partir de um repositório Git")
     restore.add_argument("--from", dest="source", required=True, help="URL ou caminho do repositório de backup")
     restore.add_argument("--branch", default="main", help="branch do backup (padrão: main)")
-    sub.add_parser("sync", help="salvar, buscar e enviar as memórias ao backup Git configurado")
+    sync = sub.add_parser("sync", help="sincronizar as memórias com o backup Git configurado")
+    sync.add_argument("--dry-run", action="store_true",
+                      help="conferir o que aconteceria sem alterar arquivos ou Git")
+    sync.add_argument("--json", action="store_true", help="mostrar o resultado em JSON para automações")
     workstream = sub.add_parser("workstream", help="organizar frentes de trabalho paralelas")
     workstream_sub = workstream.add_subparsers(dest="workstream_command", required=True)
     workstream_create = workstream_sub.add_parser("create", help="criar uma frente de trabalho")
@@ -165,22 +168,61 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Memória restaurada em {args.root}; {count} anotações carregadas e busca reconstruída.")
     elif args.command == "sync":
+        dry_run = args.dry_run
+        common_options = (
+            args.root,
+            os.getenv("OMM_GIT_BACKUP_REMOTE", "origin"),
+            os.getenv("OMM_GIT_BACKUP_BRANCH", "main"),
+            os.getenv("OMM_GIT_BACKUP_REPOSITORY_URL", "").strip(),
+            os.getenv("OMM_GIT_BACKUP_USERNAME", "x-access-token"),
+            os.getenv("OMM_GIT_BACKUP_TOKEN", ""),
+        )
         try:
-            result = sync_with_backup(
-                args.root,
-                os.getenv("OMM_GIT_BACKUP_REMOTE", "origin"),
-                os.getenv("OMM_GIT_BACKUP_BRANCH", "main"),
-                os.getenv("OMM_GIT_BACKUP_REPOSITORY_URL", "").strip(),
-                os.getenv("OMM_GIT_BACKUP_USERNAME", "x-access-token"),
-                os.getenv("OMM_GIT_BACKUP_TOKEN", ""),
+            if dry_run:
+                result = preview_sync(*common_options)
+                if args.json:
+                    print(json.dumps(result, ensure_ascii=False, indent=2))
+                else:
+                    state = "sem bloqueios conhecidos" if result["ok"] else "precisa de atenção"
+                    relationship_labels = {
+                        "up_to_date": "os commits local e remoto são iguais",
+                        "remote_ahead": "o backup tem commits mais novos",
+                        "local_ahead": "esta cópia tem commits mais novos",
+                        "diverged": "as branches seguiram caminhos diferentes",
+                        "remote_relation_unknown": "não foi possível comparar sem baixar arquivos",
+                    }
+                    print(f"Simulação concluída: {state}.")
+                    print(f"Branch {result['branch']}: {relationship_labels.get(result['relationship'], result['relationship'])}.")
+                    for path in result["local_changes"]["canonical_paths"]:
+                        print(f"  dado da OMM alterado: {path}")
+                    for path in result["local_changes"]["outside_paths"]:
+                        print(f"  fora dos dados da OMM: {path}")
+                    for reason in result["blocking_reasons"]:
+                        print(f"  atenção: {reason}")
+                    print("Nada foi salvo, mesclado ou enviado ao Git.")
+                    for limitation in result["limitations"]:
+                        print(f"  limite: {limitation}")
+                return 0 if result["ok"] else 2
+
+            report = sync_with_backup_report(
+                *common_options,
                 os.getenv("OMM_GIT_BACKUP_AUTHOR_NAME", "OMM Backup"),
                 os.getenv("OMM_GIT_BACKUP_AUTHOR_EMAIL", "omm@localhost"),
             )
-            omm.rebuild()
+            indexed_records = omm.rebuild()
         except (SyncError, BackupError, OSError, ValueError) as exc:
-            print(f"Sincronização interrompida: {exc}", file=sys.stderr)
+            if args.json:
+                print(json.dumps({"ok": False, "dry_run": dry_run, "error": str(exc)},
+                                 ensure_ascii=False))
+            else:
+                print(f"Sincronização interrompida: {exc}", file=sys.stderr)
             return 2
-        print(result)
+        if args.json:
+            print(json.dumps({**report, "dry_run": False, "search_index": "rebuilt",
+                              "indexed_records": indexed_records,
+                              "source_chunks": omm.source_chunk_count()}, ensure_ascii=False))
+        else:
+            print(report["message"])
     elif args.command == "workstream":
         if args.workstream_command == "create":
             print(json.dumps(omm.create_workstream(args.id, args.title, args.by, args.status), ensure_ascii=False))

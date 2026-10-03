@@ -52,7 +52,7 @@ Siga o guia [Como usar a OMM nos agentes](docs/USAR_OMM_NOS_AGENTES.md). Para in
 
 Por padrão, a OMM usa busca textual local. A busca semântica é opcional: em vez de exigir as mesmas palavras, ela tenta encontrar o mesmo assunto. Na stack Docker, o perfil opcional `semantic` inicia o Ollama e baixa um modelo pequeno para essa tarefa. Veja [como ativar](docs/USAR_MCP.md#busca-semântica-procurar-pelo-assunto). Agentes podem sugerir memórias para aprovação no painel.
 
-Para medir a busca sem acessar a internet nem usar dados pessoais, rode `python3 benchmarks/retrieval_eval.py`.
+Para conferir se a busca encontra exemplos esperados, rode `python3 benchmarks/retrieval_eval.py`. O conjunto usa dados inventados e inclui documentos parecidos para a posição dos resultados importar. Com `--json`, a saída pode ser lida por uma automação; `--min-hit-rate-at-3` e `--min-mrr-at-5` definem limites entre `0` e `1` e fazem o comando terminar com erro se a busca cair abaixo deles (`0.8` significa 80%). O exemplo só mede busca por palavras, sem Ollama.
 
 Para medir tempos com uma coleção inventada, rode `python3 benchmarks/performance_eval.py`. O relatório mostra a criação do índice, busca, montagem de contexto e painel. Os dados são apagados ao terminar; por padrão, a busca medida é a textual e não inclui o Ollama.
 
@@ -62,7 +62,7 @@ O repositório da aplicação guarda o programa. A pasta de dados guarda suas no
 
 O backup em Git é opcional. Pode ficar apenas no computador ou ser enviado a GitHub, GitLab, Gitea ou outro servidor. Veja [backup e restauração](docs/USAR_MCP.md#backup-automatico-no-git-opcional).
 
-Para sincronizar sem abrir o painel, execute na pasta do Compose: `docker compose exec -T omm python -m omm --root /data sync`. O [guia de backup](docs/USAR_MCP.md#sincronizar-pelo-terminal-ou-por-automacao) também mostra a versão para Podman e um exemplo para automações.
+Para conferir a sincronização sem salvar ou enviar nada, use `docker compose exec -T omm python -m omm --root /data sync --dry-run`. Para sincronizar de verdade sem abrir o painel, retire `--dry-run` e acrescente `--json` se uma automação precisar ler o resultado. O [guia de backup](docs/USAR_MCP.md#sincronizar-pelo-terminal-ou-por-automacao) também mostra a versão para Podman e explica o que a simulação consegue conferir.
 
 ## Palavras que você pode encontrar
 

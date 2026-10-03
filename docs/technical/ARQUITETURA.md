@@ -140,7 +140,7 @@ O contrato `SubagentRuntime` ainda não é uma implementação conectada ao serv
 
 Operações locais usam `RLock` por instância e `data_lock` por diretório de dados (`omm/locking.py`). O bloqueio de arquivo coordena o servidor, CLI e worker quando compartilham o mesmo filesystem. Ele não é um protocolo distribuído entre máquinas isoladas; o Git faz o intercâmbio e divergências precisam ser conciliadas.
 
-O worker de backup (`omm/backup_worker.py`) valida arquivos, prepara apenas `memory/`, `skills/` e `sources/`, cria commits com identidade própria configurável e opcionalmente envia a um remoto Git genérico. `omm/sync.py` lida com fetch/pull/merge e restringe as mudanças a dados canônicos. A restauração em diretório vazio recupera o checkout Git e valida arquivos antes de o serviço reconstruir os índices. O token de acesso remoto autentica o push; nome e email de autoria são configurações separadas.
+O worker de backup (`omm/backup_worker.py`) valida arquivos, prepara apenas `memory/`, `skills/` e `sources/`, cria commits com identidade própria configurável e opcionalmente envia a um remoto Git genérico. `omm/sync.py` lida com fetch/pull/merge e restringe as mudanças a dados canônicos. A CLI também oferece `sync --dry-run`: ela confere o estado local e consulta o último commit remoto sem alterar arquivos ou referências Git; não simula conflitos de conteúdo. `sync --json` fornece uma resposta estável para automações. A restauração em diretório vazio recupera o checkout Git e valida arquivos antes de o serviço reconstruir os índices. O token de acesso remoto autentica o push; nome e email de autoria são configurações separadas.
 
 Como o SQLite fica fora dos caminhos canônicos, não deve ser commitado no backup. Se aparecer no status Git do diretório de dados, confira o bind mount/volume de `/data/.omm`; a sincronização deliberadamente não o trata como dado canônico.
 
@@ -172,7 +172,7 @@ Como o SQLite fica fora dos caminhos canônicos, não deve ser commitado no back
 - `omm doctor`: valida instalação e configuração local.
 - `omm rebuild`: refaz o índice lexical a partir dos arquivos canônicos.
 - `omm semantic-rebuild`: recalcula embeddings para os registros e fontes atuais.
-- `python3 benchmarks/retrieval_eval.py`: avaliação sintética da qualidade das buscas.
+- `python3 benchmarks/retrieval_eval.py`: avaliação sintética da qualidade da busca lexical; use `--json` para automações e `--min-hit-rate-at-3` ou `--min-mrr-at-5` para reprovar uma execução abaixo da meta configurada.
 - `python3 benchmarks/performance_eval.py`: medição local de custos e latências em dados sintéticos.
 
 Relatórios de desempenho são observações daquele ambiente, não garantia de latência. A avaliação sintética não substitui corpus real nem revisão humana de relevância e proveniência.

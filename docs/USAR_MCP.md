@@ -166,7 +166,25 @@ docker exec NOME_DO_CONTAINER python -m omm --root /data sync
 
 Troque `NOME_DO_CONTAINER` pelo nome mostrado no primeiro comando. Se você já abriu o terminal de dentro do container no Portainer, execute somente `python -m omm --root /data sync`.
 
+Antes de sincronizar, você pode conferir o que aconteceria sem salvar nada:
+
+```sh
+docker compose exec -T omm python -m omm --root /data sync --dry-run
+```
+
+Essa simulação confere os arquivos locais e consulta qual é o último commit no backup. Ela não cria commit, não baixa arquivos, não mescla e não envia mudanças. Ela também não consegue garantir que a sincronização real ficará livre de conflitos; isso só é confirmado durante a sincronização.
+
+Para automações que precisam ler um resultado previsível, acrescente `--json`:
+
+```sh
+docker compose exec -T omm python -m omm --root /data sync --dry-run --json
+```
+
+O JSON informa se foram encontrados bloqueios, quais arquivos da OMM mudaram e se as versões local e remota parecem estar atualizadas, adiantadas ou divergentes. Se o remoto tiver avançado desde a última atualização local, a relação aparece como desconhecida: para manter a simulação sem alterações, ela não baixa os novos arquivos. A simulação não verifica conflitos de conteúdo.
+
 O comando salva as mudanças locais, busca as novidades do Git e envia o resultado ao repositório configurado. Ele usa as mesmas variáveis de acesso já definidas para a OMM; não coloque o token no comando. A opção `-T` permite usar o comando em tarefas automáticas, sem abrir um terminal interativo.
+
+Na sincronização real, `--json` inclui quantos conflitos foram preservados e onde a OMM guardou uma cópia local para revisão. Uma falha de sincronização ou uma simulação com bloqueios termina com código de saída `2`.
 
 Ao terminar, a OMM mostra uma mensagem de sucesso. Se algo der errado, ela mostra o motivo e termina com um código de erro, que um script pode detectar. Exemplo:
 

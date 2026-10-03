@@ -90,6 +90,12 @@ podman compose exec -T omm python -m omm --root /data sync
 
 `omm` é o nome do serviço no Compose padrão. Se a sua stack usa outro nome, como `ct-omm`, coloque esse nome no comando.
 
+Para conferir antes sem gravar ou enviar nada, acrescente `--dry-run`. Para uma automação ler o resultado, use também `--json`:
+
+```sh
+podman compose exec -T omm python -m omm --root /data sync --dry-run --json
+```
+
 Esse comando também serve em scripts de manutenção. Ele retorna sucesso ou erro para que a automação possa decidir o próximo passo. Veja [mais detalhes e o exemplo para Docker](USAR_MCP.md#sincronizar-pelo-terminal-ou-por-automacao).
 
 ## Atualizar a OMM
