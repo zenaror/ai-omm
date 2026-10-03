@@ -82,6 +82,16 @@ Para ver as mensagens do backup:
 podman compose --profile backup logs -f omm-backup
 ```
 
+Para sincronizar agora pelo terminal, na pasta do `compose.yaml`, use:
+
+```sh
+podman compose exec -T omm python -m omm --root /data sync
+```
+
+`omm` é o nome do serviço no Compose padrão. Se a sua stack usa outro nome, como `ct-omm`, coloque esse nome no comando.
+
+Esse comando também serve em scripts de manutenção. Ele retorna sucesso ou erro para que a automação possa decidir o próximo passo. Veja [mais detalhes e o exemplo para Docker](USAR_MCP.md#sincronizar-pelo-terminal-ou-por-automacao).
+
 ## Atualizar a OMM
 
 Na pasta da OMM, baixe a imagem mais recente e reinicie os serviços:

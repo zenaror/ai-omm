@@ -137,6 +137,50 @@ Na primeira inicialização, o restore automático baixa os dados se a pasta est
 
 No painel, **Sincronizar backup** salva as mudanças locais e busca novidades. **Atualizar** apenas recarrega a página. Se uma mudança não puder ser juntada com segurança, a OMM preserva uma cópia em `memory/imports/sync-recovery/` para revisão.
 
+### Sincronizar pelo terminal ou por automação
+
+Também é possível fazer a mesma sincronização sem abrir o painel. Abra um terminal na pasta que contém `compose.yaml` e `.env` e use o comando da ferramenta de containers que você instalou:
+
+```sh
+docker compose exec -T omm python -m omm --root /data sync
+```
+
+`omm` é o nome do serviço no arquivo Compose padrão. Se você mudou esse nome, troque-o no comando. Por exemplo, para um serviço chamado `ct-omm`:
+
+```sh
+docker compose exec -T ct-omm python -m omm --root /data sync
+```
+
+Com Podman, use:
+
+```sh
+podman compose exec -T omm python -m omm --root /data sync
+```
+
+Se a stack foi criada no Portainer e o arquivo `compose.yaml` não está disponível no servidor, conecte-se ao servidor e use o nome do container principal:
+
+```sh
+docker ps --format '{{.Names}}'
+docker exec NOME_DO_CONTAINER python -m omm --root /data sync
+```
+
+Troque `NOME_DO_CONTAINER` pelo nome mostrado no primeiro comando. Se você já abriu o terminal de dentro do container no Portainer, execute somente `python -m omm --root /data sync`.
+
+O comando salva as mudanças locais, busca as novidades do Git e envia o resultado ao repositório configurado. Ele usa as mesmas variáveis de acesso já definidas para a OMM; não coloque o token no comando. A opção `-T` permite usar o comando em tarefas automáticas, sem abrir um terminal interativo.
+
+Ao terminar, a OMM mostra uma mensagem de sucesso. Se algo der errado, ela mostra o motivo e termina com um código de erro, que um script pode detectar. Exemplo:
+
+```sh
+if docker compose exec -T omm python -m omm --root /data sync; then
+  echo "Backup sincronizado."
+else
+  echo "A sincronização falhou; confira a mensagem acima."
+  exit 1
+fi
+```
+
+O comando só funciona se a OMM estiver configurada para acessar um repositório Git. A sincronização manual sempre tenta enviar as mudanças; `OMM_GIT_BACKUP_PUSH=false` desliga apenas o envio do backup agendado.
+
 ### Restaurar manualmente (avançado)
 
 Use somente com uma pasta de dados vazia:

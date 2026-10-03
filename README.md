@@ -62,6 +62,8 @@ O repositório da aplicação guarda o programa. A pasta de dados guarda suas no
 
 O backup em Git é opcional. Pode ficar apenas no computador ou ser enviado a GitHub, GitLab, Gitea ou outro servidor. Veja [backup e restauração](docs/USAR_MCP.md#backup-automatico-no-git-opcional).
 
+Para sincronizar sem abrir o painel, execute na pasta do Compose: `docker compose exec -T omm python -m omm --root /data sync`. O [guia de backup](docs/USAR_MCP.md#sincronizar-pelo-terminal-ou-por-automacao) também mostra a versão para Podman e um exemplo para automações.
+
 ## Palavras que você pode encontrar
 
 - **Memória:** notas escolhidas para serem úteis em outras conversas.
