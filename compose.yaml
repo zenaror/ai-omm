@@ -1,6 +1,6 @@
 services:
   omm:
-    build: .
+    image: ${OMM_IMAGE:-ghcr.io/zenaror/ai-omm:latest}
     restart: unless-stopped
     environment:
       OMM_GIT_BACKUP_RESTORE: ${OMM_GIT_BACKUP_RESTORE:-true}
@@ -32,7 +32,7 @@ services:
 
   omm-backup:
     profiles: ["backup"]
-    build: .
+    image: ${OMM_IMAGE:-ghcr.io/zenaror/ai-omm:latest}
     restart: unless-stopped
     command: ["python", "-m", "omm.backup_worker", "--root", "/data"]
     environment:

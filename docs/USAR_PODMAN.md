@@ -1,6 +1,6 @@
 # Usar a OMM com Podman
 
-O Podman pode montar a mesma imagem da OMM. Não é necessário manter um Dockerfile separado: o arquivo `Dockerfile` atual é aceito pelo `podman build`. O Podman usa o mesmo formato de imagem de container. O arquivo `.dockerignore` também evita enviar ao build arquivos que o programa não precisa, como as configurações locais e a memória do usuário.
+O Podman pode usar a imagem pronta da OMM, publicada no GitHub Container Registry. Ela usa o formato OCI, aceito por Podman e Docker. Se preferir, também é possível construir a imagem a partir do código.
 
 ## O que você precisa
 
@@ -26,13 +26,14 @@ cp .env.example .env
 
 No `.env`, confira `OMM_DATA_PATH`. Essa é a pasta onde ficam as memórias. Para que a OMM possa gravar nelas, a conta Linux que executa o Podman precisa ter acesso de leitura e escrita a essa pasta. Se ela já contém seu backup, não apague nem troque a pasta.
 
-Inicie o serviço:
+Baixe a imagem e inicie o serviço:
 
 ```sh
-podman compose up --build -d
+podman compose pull
+podman compose up -d
 ```
 
-O Podman vai criar a imagem e iniciar a OMM em segundo plano. Depois, abra:
+O Podman baixa a imagem e inicia a OMM em segundo plano. Depois, abra:
 
 - MCP para os assistentes: `http://localhost:8000/mcp`
 - Painel no navegador: `http://localhost:8001`
@@ -71,7 +72,8 @@ O backup usa a mesma pasta de dados. Um serviço remoto, como GitHub, GitLab ou 
 Inicie com o perfil de backup:
 
 ```sh
-podman compose --profile backup up --build -d
+podman compose --profile backup pull
+podman compose --profile backup up -d
 ```
 
 Para ver as mensagens do backup:
@@ -82,14 +84,23 @@ podman compose --profile backup logs -f omm-backup
 
 ## Atualizar a OMM
 
-Na pasta do código da OMM, baixe a versão mais nova e recrie a imagem:
+Na pasta da OMM, baixe a imagem mais recente e reinicie os serviços:
 
 ```sh
 git pull --ff-only
-podman compose up --build -d
+podman compose pull
+podman compose up -d
 ```
 
-Se o backup agendado estiver ativo, mantenha também `--profile backup` no comando. As memórias permanecem na pasta `OMM_DATA_PATH`; a imagem nova atualiza o programa.
+Se o backup agendado estiver ativo, use `podman compose --profile backup pull` e `podman compose --profile backup up -d`. As memórias permanecem na pasta `OMM_DATA_PATH`; a imagem nova atualiza o programa. A branch principal publica `latest`; versões marcadas também publicam tags próprias.
+
+### Construir a imagem do código (opcional)
+
+Para desenvolver ou testar uma mudança local, use o arquivo de build adicional:
+
+```sh
+podman compose -f compose.yaml -f compose.build.yaml up --build -d
+```
 
 ## Se aparecer “permission denied” no Linux
 

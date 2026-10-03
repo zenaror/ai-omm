@@ -40,8 +40,11 @@ As notas ficam em arquivos simples. A busca usa um índice rápido, que pode ser
 O MCP é a conexão que permite ao assistente chamar as ferramentas da OMM. Inicie o serviço com Docker Compose:
 
 ```sh
+docker compose pull
 docker compose up -d
 ```
+
+O Compose baixa a imagem pronta publicada no GitHub Container Registry. Para construir a imagem a partir do código deste computador, use o arquivo opcional `compose.build.yaml`.
 
 Depois, configure o assistente para acessar `http://localhost:8000/mcp` e diga a ele quando consultar e atualizar a memória. Só conectar não faz o assistente usar a OMM automaticamente.
 
