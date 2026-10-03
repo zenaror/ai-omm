@@ -114,7 +114,7 @@ Essa senha protege o painel, mas não a conexão dos assistentes. Mantenha o ace
 
 ```sh
 chmod 600 .env
-docker compose --profile backup build
+docker compose --profile backup pull
 ```
 
 O restore automático ocorre quando os serviços sobem. Se preferir, também é possível restaurar manualmente para uma pasta vazia antes de iniciar a OMM:

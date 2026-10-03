@@ -40,7 +40,7 @@
 
 **Por quê:** MCP ajuda assistentes compatíveis a usar as mesmas operações. Docker simplifica manter o serviço ativo. Nenhum dos dois substitui os arquivos do Git.
 
-**Compatibilidade de containers:** manter uma imagem OCI que possa ser construída a partir do `Dockerfile` tanto com Docker quanto com Podman. Os exemplos Docker continuam válidos; o Podman usa um provedor Compose instalado para ler `compose.yaml`.
+**Compatibilidade de containers e publicação:** publicar uma imagem OCI multi-arquitetura em `ghcr.io/zenaror/ai-omm`, compatível com Docker e Podman. O GitHub Actions valida builds em pull requests e publica tags ao atualizar a branch principal ou criar uma versão `v*`. O Compose usa essa imagem pronta por padrão, evitando exigir um serviço de build no servidor de deploy. `compose.build.yaml` mantém a opção de construir a partir do código local.
 
 **Limite atual:** o Compose publica o serviço apenas em `localhost`. Escrita coordenada entre várias máquinas ainda não faz parte desta versão. O backup automático local é opcional; o envio a um serviço remoto também é opcional.
 

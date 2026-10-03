@@ -1,0 +1,14 @@
+# Optional override for building the application from this checkout.
+# Normal deployments use the prebuilt OCI image from GitHub Container Registry.
+services:
+  omm:
+    image: ai-omm:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+  omm-backup:
+    image: ai-omm:local
+    build:
+      context: .
+      dockerfile: Dockerfile
