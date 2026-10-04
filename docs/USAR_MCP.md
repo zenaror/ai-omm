@@ -7,7 +7,6 @@ O MCP conecta o assistente às ferramentas da OMM. Depois da conexão, também e
 1. Na pasta da OMM, inicie o serviço:
 
    ```sh
-   docker compose pull
    docker compose up -d
    ```
 
@@ -118,17 +117,14 @@ Escreva o valor em `.env` ou nas variáveis da stack no Portainer. Se já usa `b
 
 O código da OMM e os dados ficam separados. `OMM_DATA_PATH` aponta para a pasta de dados, que contém memórias, skills e documentos. A busca é um índice reconstruível; ela não substitui esses arquivos.
 
-Para atualizar a aplicação, entre na pasta dela e execute:
+Para atualizar o código, entre na pasta da aplicação e execute:
 
 ```sh
 git pull --ff-only
-docker compose pull
-docker compose up -d
+docker compose up --build -d
 ```
 
-O Compose usa a imagem OCI publicada no GitHub Container Registry; isso evita precisar de um serviço de build no deploy. Com os dados em uma pasta persistente, atualizar a aplicação não apaga a memória. Se usar o perfil `backup`, acrescente-o aos dois comandos.
-
-Para construir a imagem a partir do código local, junte `-f compose.build.yaml` aos comandos do Compose, por exemplo: `docker compose -f compose.yaml -f compose.build.yaml up --build -d`.
+Com os dados em uma pasta persistente, atualizar a aplicação não apaga a memória.
 
 ## Backup no Git (opcional)
 
