@@ -30,8 +30,10 @@ def _inside_canonical(path: str) -> bool:
 
 
 def _credential_args(root: Path, remote: str, remote_url: str, username: str, token: str,
-                     operation: list[str]) -> str:
+                     operation: list[str], extra_env: dict[str, str] | None = None) -> str:
     credential_file = None
+    command_env = os.environ.copy()
+    command_env.update(extra_env or {})
     try:
         if token:
             host = urlsplit(remote_url).hostname
@@ -41,14 +43,129 @@ def _credential_args(root: Path, remote: str, remote_url: str, username: str, to
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 stream.write(f"https://{quote(username, safe='')}:{quote(token, safe='')}@{host}\n")
-            return _run(root, "-c", f"credential.helper=store --file={credential_file}", *operation)
-        return _run(root, *operation)
+            return _run(root, "-c", f"credential.helper=store --file={credential_file}",
+                        *operation, env=command_env)
+        return _run(root, *operation, env=command_env)
     finally:
         if credential_file:
             try:
                 os.unlink(credential_file)
             except FileNotFoundError:
                 pass
+
+
+def _working_tree_paths(root: Path) -> list[str]:
+    status = subprocess.run(["git", "-C", str(root), "status", "--porcelain=v1", "-z",
+                             "--untracked-files=all"], capture_output=True, check=True).stdout
+    return [entry[3:].decode("utf-8", errors="replace")
+            for entry in status.split(b"\0") if len(entry) > 3]
+
+
+def _is_ancestor(root: Path, older: str, newer: str) -> bool | None:
+    result = subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", older, newer],
+                            capture_output=True, check=False)
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
+
+
+def preview_sync(root: Path, remote: str = "origin", branch: str = "main",
+                 repository_url: str = "", username: str = "", token: str = "") -> dict:
+    """Read-only sync preflight; it never stages, commits, fetches, merges, or pushes."""
+    root = root.resolve()
+    if _run(root, "rev-parse", "--is-inside-work-tree", check=False) != "true":
+        raise SyncError("a pasta de dados ainda não é um repositório Git restaurado")
+    current_branch = _run(root, "branch", "--show-current")
+    if current_branch != branch:
+        raise SyncError(f"a branch atual precisa ser '{branch}' para sincronizar")
+    configured_url = _run(root, "remote", "get-url", remote, check=False)
+    remote_url = repository_url or configured_url
+    if not remote_url:
+        raise SyncError(f"o remoto Git '{remote}' não está configurado")
+
+    staged_paths = _run(root, "diff", "--cached", "--name-only").splitlines()
+    changed_paths = _working_tree_paths(root)
+    ignored_generated = {".omm/index.sqlite3", ".omm-write.lock"}
+    outside_paths = sorted(path for path in changed_paths
+                           if not _inside_canonical(path) and path not in ignored_generated)
+    canonical_paths = sorted(path for path in changed_paths if _inside_canonical(path))
+    blocking_reasons: list[str] = []
+    if staged_paths:
+        blocking_reasons.append("há arquivos preparados manualmente no Git")
+    if outside_paths:
+        blocking_reasons.append("há mudanças fora de memory/, skills/ e sources/")
+
+    try:
+        _validate_memory(root)
+        _validate_sources(root)
+    except (BackupError, OSError, ValueError) as exc:
+        blocking_reasons.append(f"os dados locais precisam de correção: {exc}")
+
+    extra_env: dict[str, str] = {}
+    if repository_url and repository_url != configured_url:
+        try:
+            config_count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+        except ValueError as exc:
+            raise SyncError("a configuração temporária do Git está inválida") from exc
+        extra_env = {
+            "GIT_CONFIG_COUNT": str(config_count + 1),
+            f"GIT_CONFIG_KEY_{config_count}": f"remote.{remote}.url",
+            f"GIT_CONFIG_VALUE_{config_count}": repository_url,
+        }
+    remote_listing = _credential_args(
+        root, remote, remote_url, username, token,
+        ["ls-remote", "--heads", remote, f"refs/heads/{branch}"], extra_env=extra_env,
+    )
+    remote_fields = remote_listing.split()
+    if len(remote_fields) < 2:
+        raise SyncError("não foi possível localizar a branch remota configurada")
+    remote_head = remote_fields[0]
+    local_head = _run(root, "rev-parse", "HEAD")
+    tracking_ref = f"refs/remotes/{remote}/{branch}"
+    cached_remote_head = _run(root, "rev-parse", "--verify", tracking_ref, check=False)
+    if remote_head == local_head:
+        relationship = "up_to_date"
+    elif remote_head != cached_remote_head:
+        relationship = "remote_relation_unknown"
+    else:
+        local_is_ancestor = _is_ancestor(root, local_head, cached_remote_head)
+        remote_is_ancestor = _is_ancestor(root, cached_remote_head, local_head)
+        if local_is_ancestor is None or remote_is_ancestor is None:
+            relationship = "remote_relation_unknown"
+        elif local_is_ancestor:
+            relationship = "remote_ahead"
+        elif remote_is_ancestor:
+            relationship = "local_ahead"
+        else:
+            relationship = "diverged"
+
+    return {
+        "ok": not blocking_reasons,
+        "dry_run": True,
+        "branch": branch,
+        "remote": remote,
+        "local_head": local_head,
+        "remote_head": remote_head,
+        "cached_remote_head": cached_remote_head or None,
+        "relationship": relationship,
+        "local_changes": {
+            "canonical_paths": canonical_paths,
+            "outside_paths": outside_paths,
+            "staged_paths": staged_paths,
+        },
+        "would_create_local_commit": bool(canonical_paths) and not blocking_reasons,
+        "would_rebuild_search_index": not blocking_reasons,
+        "conflicts_checked": False,
+        "blocking_reasons": blocking_reasons,
+        "limitations": [
+            "A simulação consulta a ponta atual do remoto, mas não baixa arquivos nem altera o Git.",
+            "Ela não monta um merge temporário; conflitos de conteúdo só são confirmados durante a sincronização real.",
+            *(["A ponta remota mudou desde a última atualização local; sem baixar os novos objetos, a relação entre as branches é desconhecida."]
+              if relationship == "remote_relation_unknown" else []),
+        ],
+    }
 
 
 def _stage_local(root: Path, author_name: str, author_email: str) -> bool:
@@ -140,7 +257,7 @@ def _merge_topology(local: bytes, remote: bytes) -> tuple[bytes, bool]:
     return (json.dumps(result, ensure_ascii=False, indent=2) + "\n").encode("utf-8"), conflict
 
 
-def _resolve_conflicts(root: Path, author_name: str, author_email: str) -> int:
+def _resolve_conflicts(root: Path, author_name: str, author_email: str) -> tuple[int, int, str | None]:
     listing = subprocess.run(["git", "-C", str(root), "ls-files", "-u", "-z"],
                              capture_output=True, check=True).stdout
     stages: dict[str, dict[int, bytes | None]] = {}
@@ -197,16 +314,20 @@ def _resolve_conflicts(root: Path, author_name: str, author_email: str) -> int:
             _run(root, "rm", "--cached", "--ignore-unmatch", "--", path)
     if manifest:
         recovery.mkdir(parents=True, exist_ok=True)
-        (recovery / "manifest.json").write_text(json.dumps({"created_at": stamp, "conflicts": manifest},
-                                                               ensure_ascii=False, indent=2) + "\n",
-                                                   encoding="utf-8")
+        manifest_path = recovery / "manifest.json"
+        manifest_path.write_text(json.dumps({"created_at": stamp, "conflicts": manifest},
+                                             ensure_ascii=False, indent=2) + "\n",
+                                 encoding="utf-8")
         _run(root, "add", "--", recovery.relative_to(root).as_posix())
-    return len(stages)
+        manifest_relative = manifest_path.relative_to(root).as_posix()
+    else:
+        manifest_relative = None
+    return len(stages), len(manifest), manifest_relative
 
 
 def _sync_with_backup_locked(root: Path, remote: str = "origin", branch: str = "main", repository_url: str = "",
                      username: str = "", token: str = "", author_name: str = "OMM Backup",
-                     author_email: str = "omm@localhost") -> str:
+                     author_email: str = "omm@localhost") -> dict[str, object]:
     """Save local canonical changes, merge backup updates, preserve conflicts, then push."""
     root = root.resolve()
     if _run(root, "rev-parse", "--is-inside-work-tree", check=False) != "true":
@@ -233,9 +354,9 @@ def _sync_with_backup_locked(root: Path, remote: str = "origin", branch: str = "
     ahead = subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", remote_ref, "HEAD"], check=False).returncode == 0
     if behind:
         _run(root, "merge", "--ff-only", remote_ref)
-        merged_conflicts = 0
+        merged_conflicts, preserved_copies, recovery_manifest = 0, 0, None
     elif ahead:
-        merged_conflicts = 0
+        merged_conflicts, preserved_copies, recovery_manifest = 0, 0, None
     else:
         # Git checks the committer identity while preparing some merge states,
         # even when --no-commit is set. Keep the OMM identity on this operation
@@ -245,7 +366,11 @@ def _sync_with_backup_locked(root: Path, remote: str = "origin", branch: str = "
                                "-c", f"user.email={author_email}", "merge", "--no-commit", "--no-ff", remote_ref],
                               text=True, capture_output=True, check=False)
         try:
-            merged_conflicts = _resolve_conflicts(root, author_name, author_email) if proc.returncode else 0
+            if proc.returncode:
+                merged_conflicts, preserved_copies, recovery_manifest = _resolve_conflicts(
+                    root, author_name, author_email)
+            else:
+                merged_conflicts, preserved_copies, recovery_manifest = 0, 0, None
         except Exception:
             _run(root, "merge", "--abort", check=False)
             raise
@@ -261,14 +386,36 @@ def _sync_with_backup_locked(root: Path, remote: str = "origin", branch: str = "
              "commit", "-m", "chore(omm): sincronizar backup")
     _credential_args(root, remote, remote_url, username, token,
                      ["push", remote, f"HEAD:refs/heads/{branch}"])
-    return ("Sincronização concluída: alterações locais salvas" if local_saved else "Sincronização concluída") + \
-        f"; {merged_conflicts} conflito(s) preservado(s)" + ("; cópias locais em memory/imports/sync-recovery" if merged_conflicts else "")
+    message = ("Sincronização concluída: alterações locais salvas" if local_saved else "Sincronização concluída") + \
+        f"; {merged_conflicts} conflito(s) preservado(s)" + \
+        (f"; {preserved_copies} cópia(s) local(is) em {recovery_manifest}"
+         if preserved_copies and recovery_manifest else "")
+    return {
+        "ok": True,
+        "branch": branch,
+        "remote": remote,
+        "pushed": True,
+        "local_changes_committed": local_saved,
+        "conflicts_preserved": merged_conflicts,
+        "local_copies_preserved": preserved_copies,
+        "recovery_manifest": recovery_manifest,
+        "conflicts_checked": True,
+        "message": message,
+    }
+
+
+def sync_with_backup_report(root: Path, remote: str = "origin", branch: str = "main", repository_url: str = "",
+                            username: str = "", token: str = "", author_name: str = "OMM Backup",
+                            author_email: str = "omm@localhost") -> dict[str, object]:
+    """Run a Git sync and return fields suitable for scripts and monitoring."""
+    with data_lock(root):
+        return _sync_with_backup_locked(root, remote, branch, repository_url,
+                                        username, token, author_name, author_email)
 
 
 def sync_with_backup(root: Path, remote: str = "origin", branch: str = "main", repository_url: str = "",
                      username: str = "", token: str = "", author_name: str = "OMM Backup",
                      author_email: str = "omm@localhost") -> str:
     """Run a whole Git sync without racing another OMM writer or backup job."""
-    with data_lock(root):
-        return _sync_with_backup_locked(root, remote, branch, repository_url,
-                                        username, token, author_name, author_email)
+    return str(sync_with_backup_report(root, remote, branch, repository_url, username, token,
+                                       author_name, author_email)["message"])

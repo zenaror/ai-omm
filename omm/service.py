@@ -15,6 +15,7 @@ from .adapters import GenericMarkdownAdapter
 from .models import MemoryRecord
 from .retrieval import Retriever, SQLiteFTSRetriever
 from .redaction import find_credentials
+from .registries import save_role as save_role_file, save_skill as save_skill_file
 from .source_documents import SourceHit, import_source_markdown, read_source_chunks
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
@@ -303,6 +304,18 @@ class OMM:
             if result["status"] == "imported":
                 self._index_schema_valid = False
         return result
+
+    def save_skill(self, name: str, content: str,
+                   expected_sha256: str | None = None) -> dict[str, object]:
+        """Create a skill, or update it only when the caller confirms its current hash."""
+        with self.operation_lock():
+            return save_skill_file(self.root, name, content, expected_sha256)
+
+    def save_role(self, name: str, content: str,
+                  expected_sha256: str | None = None) -> dict[str, object]:
+        """Create a role, or update it only when the caller confirms its current hash."""
+        with self.operation_lock():
+            return save_role_file(self.root, name, content, expected_sha256)
 
     def rebuild_semantic(self) -> int:
         """Create the optional vector index from canonical records and source files."""

@@ -64,7 +64,9 @@
 
 **Revisão antes de guardar:** agentes podem propor novas anotações; a pessoa aprova ou recusa no painel. A lista de possíveis semelhantes usa palavras como pista, não decide sozinha se há conflito. O arquivo `memory/proposals.jsonl` é dado canônico e segue no backup Git.
 
-**Avaliação de busca:** manter um pequeno conjunto sintético, sem dados pessoais, para medir se buscas de exemplo encontram as memórias e fontes esperadas e quanto texto o contexto prepara. Isso ajuda a perceber regressões sem usar serviços externos.
+**Avaliação de busca:** manter um conjunto sintético e pequeno, com resultados esperados e documentos parecidos que disputem posição. A ferramenta mede acerto no top 1/3/5 e MRR@5, aceita limites para detectar regressões e não usa rede, dados pessoais ou juiz LLM. Ela mede busca lexical; a busca semântica deve ser medida separadamente no serviço configurado.
+
+**Simulação e automação do sync:** `omm sync --dry-run` valida os dados, mostra arquivos locais alterados e consulta a referência mais recente do remoto sem fazer fetch, commit, merge ou push. O resultado JSON (`--json`) tem campos estáveis e código de saída não zero para bloqueios. A simulação não antecipa conflitos de conteúdo; o relatório JSON da sincronização real informa quantos conflitos foram preservados e onde as cópias locais foram guardadas. A sincronização real continua sendo a confirmação final.
 
 ## Índice derivado e atualização rápida
 

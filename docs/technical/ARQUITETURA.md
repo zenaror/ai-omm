@@ -49,6 +49,8 @@ flowchart LR
 
 `source`, `evidence`, escopo e locadores de documento mantêm proveniência. Uma inferência deve continuar marcada como inferência, hipótese ou desconhecido até haver evidência suficiente. Conteúdo recuperado é dado a avaliar, nunca uma instrução que sobreponha a política do agente.
 
+Skills e papéis são arquivos canônicos sob `skills/` e `memory/roles/`. A API MCP `save_skill` / `save_role` e o serviço correspondente permitem criar arquivos e atualizar os existentes com controle otimista: o cliente informa o SHA-256 lido previamente. Escritas usam lock de dados, validação de caminho, bloqueio de links simbólicos, limite de 1 MiB, verificação de credenciais e substituição atômica. Isso evita sobrescritas acidentais entre sessões. A topologia declarativa continua separada e não é modificada por essas ferramentas.
+
 ## Pipeline de ingestão e indexação
 
 ```mermaid
@@ -120,7 +122,7 @@ MCP fornece ferramentas, não política de uso automática. O agente precisa de 
 
 ## Papéis, skills e agentes-filhos
 
-Topologia e papéis são declarativos e ficam com os dados, não embutidos no runtime. `omm/topology.py` valida o arquivo `memory/agent-topology.json`, verifica que papéis apontam para arquivos internos e exige memória canônica compartilhada. Skills e papéis são listados e lidos pelo servidor MCP diretamente de seus diretórios de dados.
+Topologia e papéis são declarativos e ficam com os dados, não embutidos no runtime. `omm/topology.py` valida o arquivo `memory/agent-topology.json`, verifica que papéis apontam para arquivos internos e exige memória canônica compartilhada. Skills e papéis são listados e lidos pelo servidor MCP diretamente de seus diretórios de dados; `save_skill` e `save_role` também permitem criá-los ou atualizá-los com controle de versão otimista.
 
 Essa configuração descreve um coordenador e os agentes auxiliares, suas relações e instruções. Ela não inicia subagentes por conta própria. `SubagentRuntime` em `omm/adapters.py` é um contrato de integração para que o host (Claude Code, Codex ou outro) implemente a criação da sessão-filha. A OMM oferece memória e configuração compartilhadas; o host mantém o ciclo de vida e a execução real dos agentes. `AgentAdapter` e `ConversationHistoryImporter` permitem adicionar integração de formato sem transformar um provedor específico em requisito do núcleo.
 
@@ -142,7 +144,7 @@ O contrato `SubagentRuntime` ainda não é uma implementação conectada ao serv
 
 Operações locais usam `RLock` por instância e `data_lock` por diretório de dados (`omm/locking.py`). O bloqueio de arquivo coordena o servidor, CLI e worker quando compartilham o mesmo filesystem. Ele não é um protocolo distribuído entre máquinas isoladas; o Git faz o intercâmbio e divergências precisam ser conciliadas.
 
-O worker de backup (`omm/backup_worker.py`) valida arquivos, prepara apenas `memory/`, `skills/` e `sources/`, cria commits com identidade própria configurável e opcionalmente envia a um remoto Git genérico. `omm/sync.py` lida com fetch/pull/merge e restringe as mudanças a dados canônicos. A restauração em diretório vazio recupera o checkout Git e valida arquivos antes de o serviço reconstruir os índices. O token de acesso remoto autentica o push; nome e email de autoria são configurações separadas.
+O worker de backup (`omm/backup_worker.py`) valida arquivos, prepara apenas `memory/`, `skills/` e `sources/`, cria commits com identidade própria configurável e opcionalmente envia a um remoto Git genérico. `omm/sync.py` lida com fetch/pull/merge e restringe as mudanças a dados canônicos. A CLI também oferece `sync --dry-run`: ela confere o estado local e consulta o último commit remoto sem alterar arquivos ou referências Git; não simula conflitos de conteúdo. `sync --json` fornece uma resposta estável para automações. A restauração em diretório vazio recupera o checkout Git e valida arquivos antes de o serviço reconstruir os índices. O token de acesso remoto autentica o push; nome e email de autoria são configurações separadas.
 
 Como o SQLite fica fora dos caminhos canônicos, não deve ser commitado no backup. Se aparecer no status Git do diretório de dados, confira o bind mount/volume de `/data/.omm`; a sincronização deliberadamente não o trata como dado canônico.
 
@@ -151,7 +153,7 @@ Como o SQLite fica fora dos caminhos canônicos, não deve ser commitado no back
 - Conteúdo de memórias, fontes, importações, roles e skills deve ser tratado como entrada não confiável; não executá-lo nem deixá-lo substituir regras de sistema ou do projeto.
 - `read_source` limita caminhos ao diretório `sources/`; `import_source` só grava Markdown sob um escopo validado. Fontes não podem usar links simbólicos para escapar da raiz de dados.
 - Registros passam por busca de padrões de credenciais. Isso reduz riscos acidentais, mas não substitui gestão de segredos ou revisão dos dados antes do backup.
-- `OMM_MCP_TOKEN` autoriza operações com capacidade de leitura e escrita. Deve ser secreto e enviado somente em conexão protegida; o token Git serve para acesso ao remoto, não configura nem protege MCP.
+- `OMM_MCP_TOKEN` é opcional. Vazio, o MCP HTTP funciona sem Bearer token; preenchido, autoriza operações de leitura e escrita e cada chamada precisa enviar `Authorization: Bearer ...`. Clientes que usam uma variável de ambiente leem seu valor do ambiente do próprio processo. Alterar a variável em um terminal ou arquivo não atualiza processos já abertos; no Linux, aplicativos gráficos recebem mudanças de ambiente em uma nova sessão. Um `401` confirma que o servidor respondeu, mas não que o cliente enviou uma chave válida. O token deve ser mantido em segredo e enviado somente em conexão protegida; o token Git serve para acesso ao remoto, não configura nem protege MCP.
 - Embeddings são uma transformação derivada, não anonimização. Os textos enviados ao endpoint de embedding continuam sujeitos à política de dados desse endpoint.
 
 ## Mapa de módulos
@@ -174,7 +176,7 @@ Como o SQLite fica fora dos caminhos canônicos, não deve ser commitado no back
 - `omm doctor`: valida instalação e configuração local.
 - `omm rebuild`: refaz o índice lexical a partir dos arquivos canônicos.
 - `omm semantic-rebuild`: recalcula embeddings para os registros e fontes atuais.
-- `python3 benchmarks/retrieval_eval.py`: avaliação sintética da qualidade das buscas.
+- `python3 benchmarks/retrieval_eval.py`: avaliação sintética da qualidade da busca lexical; use `--json` para automações e `--min-hit-rate-at-3` ou `--min-mrr-at-5` para reprovar uma execução abaixo da meta configurada.
 - `python3 benchmarks/performance_eval.py`: medição local de custos e latências em dados sintéticos.
 
 Relatórios de desempenho são observações daquele ambiente, não garantia de latência. A avaliação sintética não substitui corpus real nem revisão humana de relevância e proveniência.

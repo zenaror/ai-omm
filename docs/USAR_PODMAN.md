@@ -82,6 +82,22 @@ Para ver as mensagens do backup:
 podman compose --profile backup logs -f omm-backup
 ```
 
+Para sincronizar agora pelo terminal, na pasta do `compose.yaml`, use:
+
+```sh
+podman compose exec -T omm python -m omm --root /data sync
+```
+
+`omm` é o nome do serviço no Compose padrão. Se a sua stack usa outro nome, como `ct-omm`, coloque esse nome no comando.
+
+Para conferir antes sem gravar ou enviar nada, acrescente `--dry-run`. Para uma automação ler o resultado, use também `--json`:
+
+```sh
+podman compose exec -T omm python -m omm --root /data sync --dry-run --json
+```
+
+Esse comando também serve em scripts de manutenção. Ele retorna sucesso ou erro para que a automação possa decidir o próximo passo. Veja [mais detalhes e o exemplo para Docker](USAR_MCP.md#sincronizar-pelo-terminal-ou-por-automacao).
+
 ## Atualizar a OMM
 
 Na pasta da OMM, baixe a imagem mais recente e reinicie os serviços:
@@ -110,7 +126,7 @@ Em computadores com SELinux, o sistema pode bloquear o acesso mesmo quando as pe
 
 ## Acesso pela rede
 
-Por padrão, as portas ficam abertas apenas no mesmo computador. Para usar o MCP e o painel de outro computador, configure `OMM_BIND_ADDRESS=0.0.0.0` no `.env` e reinicie os serviços. Isso deixa as portas visíveis na rede. Configure `OMM_MCP_TOKEN` para proteger o MCP e veja as orientações de segurança em [USAR_MCP.md](USAR_MCP.md#proteger-o-mcp-quando-usar-pela-rede) e [PAINEL_WEB.md](PAINEL_WEB.md).
+Por padrão, as portas ficam abertas apenas no mesmo computador. Para usar o MCP e o painel de outro computador, configure `OMM_BIND_ADDRESS=0.0.0.0` no `.env` e reinicie os serviços. Isso deixa as portas visíveis na rede. O token `OMM_MCP_TOKEN` é opcional; configure-o se quiser exigir uma chave nas chamadas MCP. Veja as orientações de segurança em [USAR_MCP.md](USAR_MCP.md#proteger-o-mcp-quando-usar-pela-rede) e [PAINEL_WEB.md](PAINEL_WEB.md).
 
 ## Referências
 

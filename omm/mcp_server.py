@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -34,6 +35,9 @@ def build_server(root: Path):
             "Use semantic_search apenas quando busca por significado for útil e estiver habilitada. Os modos válidos são all, memory e sources. "
             "Se retornar status=building, use semantic_index_status para acompanhar; a busca lexical continua disponível durante a preparação. "
             "Use list_skills/list_roles para ver opções e abra só a skill ou papel necessário com get_skill/get_role. "
+            "Para criar ou corrigir uma skill/papel, use save_skill/save_role. Leia o conteúdo atual antes de editar; "
+            "a ferramenta recusa sobrescrever um arquivo diferente sem expected_sha256 igual ao hash atual. "
+            "As mudanças vão para os dados canônicos da OMM (backup), não para o repositório da aplicação. "
             "Para guardar documentos completos em sources/, use import_source. Informe o escopo, o caminho original relativo e o texto Markdown. "
             "A ferramenta não sobrescreve fontes existentes e bloqueia credenciais detectadas; depois da importação, a busca lexical as encontra automaticamente. "
             "Para sugerir uma memória nova, use propose_memory: a pessoa revisa no painel, junto com possíveis semelhantes. "
@@ -244,7 +248,8 @@ def build_server(root: Path):
             if scope is None or skill_scope in requested_scopes or (scope == "global" and skill_scope == "cross-project-domain"):
                 result.append({"name": name_match.group(1).strip() if name_match else name,
                                "scope": skill_scope,
-                               "description": description_match.group(1).strip()[:240] if description_match else ""})
+                               "description": description_match.group(1).strip()[:240] if description_match else "",
+                               "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
         return result
 
     @server.tool()
@@ -257,6 +262,17 @@ def build_server(root: Path):
         if path.parent.parent != skills_root or not path.is_file():
             raise ValueError(f"Skill não encontrada: {name}")
         return path.read_text(encoding="utf-8")
+
+    @server.tool()
+    def save_skill(name: str, content: str, expected_sha256: str | None = None) -> dict:
+        """Cria uma skill ou atualiza uma versão lida anteriormente, confirmando seu sha256."""
+        result = omm.save_skill(name, content, expected_sha256)
+        result["message"] = {
+            "created": "Skill criada nos dados canônicos da OMM.",
+            "updated": "Skill atualizada nos dados canônicos da OMM.",
+            "already_present": "A skill já tinha exatamente este conteúdo.",
+        }[str(result["status"])]
+        return result
 
     @server.tool()
     def list_roles() -> list[dict]:
@@ -273,7 +289,8 @@ def build_server(root: Path):
             summary = next((line.strip().lstrip("#*- ") for line in text.splitlines()
                             if line.strip() and not line.lstrip().startswith("#")), "")
             result.append({"name": path.relative_to(roles_root).with_suffix("").as_posix(),
-                           "summary": summary[:240]})
+                           "summary": summary[:240],
+                           "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
         return result
 
     @server.tool()
@@ -288,6 +305,17 @@ def build_server(root: Path):
         if roles_root not in path.parents or not path.is_file():
             raise ValueError(f"Papel não encontrado: {name}")
         return path.read_text(encoding="utf-8")
+
+    @server.tool()
+    def save_role(name: str, content: str, expected_sha256: str | None = None) -> dict:
+        """Cria um papel ou atualiza uma versão lida anteriormente, confirmando seu sha256."""
+        result = omm.save_role(name, content, expected_sha256)
+        result["message"] = {
+            "created": "Papel criado nos dados canônicos da OMM.",
+            "updated": "Papel atualizado nos dados canônicos da OMM.",
+            "already_present": "O papel já tinha exatamente este conteúdo.",
+        }[str(result["status"])]
+        return result
 
     @server.tool()
     def get_agent_topology(scope: str | None = None) -> dict:

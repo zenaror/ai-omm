@@ -92,6 +92,14 @@ Na primeira busca de cada escopo (global ou projeto), a OMM prepara os vetores d
 
 Quando habilitada, o agente pode chamar `semantic_search` se a busca comum não encontrar algo que parece estar na memória. Na linha de comando, use `omm semantic-search "sua pergunta"`; para refazer manualmente o índice, use `omm semantic-rebuild`. Esses comandos da CLI esperam a reconstrução terminar.
 
+### Criar ou atualizar skills e papéis
+
+As skills ensinam um jeito reutilizável de trabalhar. Os papéis explicam a função de um especialista ou subagente. O agente pode consultar `list_skills` / `get_skill` e `list_roles` / `get_role`, e agora também gravar essas orientações com `save_skill` e `save_role`.
+
+Para criar, envie um nome e o texto completo. Skills precisam começar com metadados `name` e `description`; papéis podem usar subpastas, como `open-gbp/planner`. Para atualizar, leia o arquivo atual e copie o `sha256` devolvido na lista como `expected_sha256`. Assim, uma sessão antiga não apaga silenciosamente uma edição mais nova. O texto é validado para bloquear credenciais conhecidas e tem limite de 1 MiB.
+
+Essas ferramentas só alteram os dados persistentes da OMM, em `skills/` e `memory/roles/`. Elas não criam nem iniciam subagentes, não alteram a topologia automaticamente e não sincronizam o backup Git. Depois da edição, confira o resultado com `get_skill` ou `get_role`; o backup será sincronizado pelo procedimento normal quando você decidir.
+
 ## Perfis da stack
 
 `COMPOSE_PROFILES` escolhe quais serviços extras a stack inicia. Os nomes disponíveis são:
@@ -141,6 +149,68 @@ Na primeira inicialização, o restore automático baixa os dados se a pasta est
 
 No painel, **Sincronizar backup** salva as mudanças locais e busca novidades. **Atualizar** apenas recarrega a página. Se uma mudança não puder ser juntada com segurança, a OMM preserva uma cópia em `memory/imports/sync-recovery/` para revisão.
 
+### Sincronizar pelo terminal ou por automação
+
+Também é possível fazer a mesma sincronização sem abrir o painel. Abra um terminal na pasta que contém `compose.yaml` e `.env` e use o comando da ferramenta de containers que você instalou:
+
+```sh
+docker compose exec -T omm python -m omm --root /data sync
+```
+
+`omm` é o nome do serviço no arquivo Compose padrão. Se você mudou esse nome, troque-o no comando. Por exemplo, para um serviço chamado `ct-omm`:
+
+```sh
+docker compose exec -T ct-omm python -m omm --root /data sync
+```
+
+Com Podman, use:
+
+```sh
+podman compose exec -T omm python -m omm --root /data sync
+```
+
+Se a stack foi criada no Portainer e o arquivo `compose.yaml` não está disponível no servidor, conecte-se ao servidor e use o nome do container principal:
+
+```sh
+docker ps --format '{{.Names}}'
+docker exec NOME_DO_CONTAINER python -m omm --root /data sync
+```
+
+Troque `NOME_DO_CONTAINER` pelo nome mostrado no primeiro comando. Se você já abriu o terminal de dentro do container no Portainer, execute somente `python -m omm --root /data sync`.
+
+Antes de sincronizar, você pode conferir o que aconteceria sem salvar nada:
+
+```sh
+docker compose exec -T omm python -m omm --root /data sync --dry-run
+```
+
+Essa simulação confere os arquivos locais e consulta qual é o último commit no backup. Ela não cria commit, não baixa arquivos, não mescla e não envia mudanças. Ela também não consegue garantir que a sincronização real ficará livre de conflitos; isso só é confirmado durante a sincronização.
+
+Para automações que precisam ler um resultado previsível, acrescente `--json`:
+
+```sh
+docker compose exec -T omm python -m omm --root /data sync --dry-run --json
+```
+
+O JSON informa se foram encontrados bloqueios, quais arquivos da OMM mudaram e se as versões local e remota parecem estar atualizadas, adiantadas ou divergentes. Se o remoto tiver avançado desde a última atualização local, a relação aparece como desconhecida: para manter a simulação sem alterações, ela não baixa os novos arquivos. A simulação não verifica conflitos de conteúdo.
+
+O comando salva as mudanças locais, busca as novidades do Git e envia o resultado ao repositório configurado. Ele usa as mesmas variáveis de acesso já definidas para a OMM; não coloque o token no comando. A opção `-T` permite usar o comando em tarefas automáticas, sem abrir um terminal interativo.
+
+Na sincronização real, `--json` inclui quantos conflitos foram preservados e onde a OMM guardou uma cópia local para revisão. Uma falha de sincronização ou uma simulação com bloqueios termina com código de saída `2`.
+
+Ao terminar, a OMM mostra uma mensagem de sucesso. Se algo der errado, ela mostra o motivo e termina com um código de erro, que um script pode detectar. Exemplo:
+
+```sh
+if docker compose exec -T omm python -m omm --root /data sync; then
+  echo "Backup sincronizado."
+else
+  echo "A sincronização falhou; confira a mensagem acima."
+  exit 1
+fi
+```
+
+O comando só funciona se a OMM estiver configurada para acessar um repositório Git. A sincronização manual sempre tenta enviar as mudanças; `OMM_GIT_BACKUP_PUSH=false` desliga apenas o envio do backup agendado.
+
 ### Restaurar manualmente (avançado)
 
 Use somente com uma pasta de dados vazia:
@@ -166,17 +236,41 @@ Essa senha protege o painel, mas não o MCP. Mantenha as conexões em uma rede p
 
 ### Proteger o MCP quando usar pela rede
 
-No mesmo computador, deixe `OMM_MCP_TOKEN` vazio. Para conexões MCP pela rede, crie uma chave longa:
+O token é opcional: sem ele, o MCP continua funcionando sem pedir uma chave. No mesmo computador, normalmente deixe `OMM_MCP_TOKEN` vazio. Se quiser exigir uma chave para usar o MCP pela rede, crie uma chave longa:
 
 ```sh
 python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
 ```
 
-Coloque a chave em `OMM_MCP_TOKEN` no `.env` da OMM e reinicie o serviço. O assistente também precisa enviar a mesma chave no cabeçalho `Authorization`. No Codex, configure a variável no ambiente em que o Codex é iniciado e use:
+Coloque a chave em `OMM_MCP_TOKEN` no `.env` da OMM e reinicie o serviço. Só então o assistente precisa enviar a mesma chave no cabeçalho `Authorization`. No Codex, configure a conexão para ler a variável `OMM_MCP_TOKEN` e use:
 
 ```sh
 codex mcp add omm --url http://SERVIDOR:8000/mcp --bearer-token-env-var OMM_MCP_TOKEN
 ```
+
+#### Codex Desktop no Linux
+
+Siga estas etapas somente se você ativou `OMM_MCP_TOKEN` na OMM. Sem token no servidor, não precisa configurar essa variável no Codex. Se você abre o Codex pelo menu de aplicativos, ele precisa receber a variável quando a sessão gráfica começa. Um `export` feito em um terminal só vale para aquele terminal e os programas abertos por ele; não atualiza um Codex que já está aberto.
+
+Para disponibilizar a variável aos aplicativos da sessão, abra um terminal e edite `/etc/environment`:
+
+```sh
+sudoedit /etc/environment
+```
+
+Acrescente esta linha, trocando o texto de exemplo pela chave da OMM:
+
+```text
+OMM_MCP_TOKEN=COLE_A_CHAVE_AQUI
+```
+
+Escreva somente `NOME=valor`, sem `export`. Salve o arquivo, saia da sessão do Linux e entre novamente. Fechar e reabrir apenas o Codex pode manter o ambiente antigo. Abra-o pelo atalho normal e confirme que as ferramentas da OMM aparecem. Para conferir a variável no terminal sem mostrar a chave:
+
+```sh
+if printenv OMM_MCP_TOKEN >/dev/null; then echo "Chave carregada"; else echo "Chave ausente"; fi
+```
+
+`/etc/environment` vale para todas as contas locais. Em um computador com outras pessoas, lembre-se de que a chave dá acesso de leitura e escrita à OMM. Se aparecer erro `401`, o servidor foi alcançado, mas a chave ausente ou incorreta não foi aceita.
 
 No Claude Code, use:
 
