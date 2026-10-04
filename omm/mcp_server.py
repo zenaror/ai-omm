@@ -15,7 +15,7 @@ from .performance import measure_performance
 from .restore import RestoreError, resolve_restore_source, restore_on_start
 from .web_server import start_dashboard
 from .topology import add_historical_source as add_topology_source, load_topology, topology_sha256
-from .source_documents import MAX_SOURCE_FILE_BYTES
+from .source_documents import read_source_markdown
 
 
 def build_server(root: Path):
@@ -40,7 +40,7 @@ def build_server(root: Path):
             "As mudanças vão para os dados canônicos da OMM (backup), não para o repositório da aplicação. "
             "Para guardar documentos completos em sources/, use import_source. Informe o escopo, o caminho original relativo e o texto Markdown. "
             "A ferramenta não sobrescreve fontes existentes e bloqueia credenciais detectadas; depois da importação, a busca lexical as encontra automaticamente. "
-            "Para corrigir ou remover uma fonte já guardada, use replace_source ou delete_source com o sha256 atual; a remoção do arquivo atual não apaga versões antigas do histórico Git. "
+            "Para corrigir ou remover uma fonte já guardada, use read_source para obter o sha256 integral e passe-o a replace_source ou delete_source; a remoção do arquivo atual não apaga versões antigas do histórico Git. "
             "Para registrar uma conversa histórica já importada no mapa de agentes, use add_historical_source com o sha256 devolvido por get_agent_topology. "
             "Para sugerir uma memória nova, use propose_memory: a pessoa revisa no painel, junto com possíveis semelhantes. "
             "Use remember só quando a pessoa pedir para salvar diretamente. Ao atualizar algo, marque a antiga como superseded. "
@@ -152,22 +152,8 @@ def build_server(root: Path):
 
     @server.tool()
     def read_source(path: str, start_line: int, end_line: int) -> dict:
-        """Lê um trecho pequeno do Markdown original depois de localizar a fonte com search_sources."""
-        source_root = (omm.root / "sources").resolve()
-        source_path = (omm.root / path).resolve()
-        if source_root not in source_path.parents or source_path.suffix.lower() != ".md" or not source_path.is_file():
-            raise ValueError("A fonte precisa ser um arquivo Markdown dentro de sources/.")
-        if start_line < 1 or end_line < start_line or end_line - start_line >= 80:
-            raise ValueError("Escolha um trecho de até 80 linhas.")
-        if source_path.stat().st_size > MAX_SOURCE_FILE_BYTES:
-            raise ValueError("A fonte é grande demais para abrir por esta ferramenta.")
-        lines = source_path.read_text(encoding="utf-8").splitlines()
-        if start_line > len(lines):
-            raise ValueError("A linha inicial não existe nessa fonte.")
-        selected = "\n".join(lines[start_line - 1:end_line])
-        return {"source": source_path.relative_to(omm.root).as_posix(),
-                "start_line": start_line, "end_line": min(end_line, len(lines)),
-                "content": selected[:8000], "truncated": len(selected) > 8000}
+        """Lê um trecho pequeno e devolve o sha256 integral para edições protegidas."""
+        return read_source_markdown(omm.root, path, start_line, end_line)
 
     @server.tool()
     def import_source(scope: str, relative_path: str, content: str) -> dict:
