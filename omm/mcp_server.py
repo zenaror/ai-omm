@@ -34,6 +34,8 @@ def build_server(root: Path):
             "Use semantic_search apenas quando busca por significado for útil e estiver habilitada. Os modos válidos são all, memory e sources. "
             "Se retornar status=building, use semantic_index_status para acompanhar; a busca lexical continua disponível durante a preparação. "
             "Use list_skills/list_roles para ver opções e abra só a skill ou papel necessário com get_skill/get_role. "
+            "Para guardar documentos completos em sources/, use import_source. Informe o escopo, o caminho original relativo e o texto Markdown. "
+            "A ferramenta não sobrescreve fontes existentes e bloqueia credenciais detectadas; depois da importação, a busca lexical as encontra automaticamente. "
             "Para sugerir uma memória nova, use propose_memory: a pessoa revisa no painel, junto com possíveis semelhantes. "
             "Use remember só quando a pessoa pedir para salvar diretamente. Ao atualizar algo, marque a antiga como superseded. "
             "Guarde fatos verificados e decisões duradouras; use handoff ao passar um trabalho importante. "
@@ -160,6 +162,17 @@ def build_server(root: Path):
         return {"source": source_path.relative_to(omm.root).as_posix(),
                 "start_line": start_line, "end_line": min(end_line, len(lines)),
                 "content": selected[:8000], "truncated": len(selected) > 8000}
+
+    @server.tool()
+    def import_source(scope: str, relative_path: str, content: str) -> dict:
+        """Importa um Markdown completo para sources/<escopo>/<caminho>, sem sobrescrever arquivo existente."""
+        result = omm.import_source(scope, relative_path, content)
+        result["message"] = (
+            "Fonte já existia com o mesmo conteúdo; nada foi alterado."
+            if result["status"] == "already_present"
+            else "Fonte importada para os dados canônicos da OMM. A busca será atualizada automaticamente."
+        )
+        return result
 
     @server.tool()
     def context(query: str, scope: str = "global", include_global: bool = True,

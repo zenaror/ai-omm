@@ -15,7 +15,7 @@ from .adapters import GenericMarkdownAdapter
 from .models import MemoryRecord
 from .retrieval import Retriever, SQLiteFTSRetriever
 from .redaction import find_credentials
-from .source_documents import SourceHit, read_source_chunks
+from .source_documents import SourceHit, import_source_markdown, read_source_chunks
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
 from .locking import data_lock
@@ -291,6 +291,18 @@ class OMM:
         with self.operation_lock():
             self._ensure_index_current()
             return self.retriever.search_sources(query, max(0, min(int(limit), MAX_SOURCE_RESULTS)), scopes)
+
+    def import_source(self, scope: str, relative_path: str, content: str) -> dict[str, object]:
+        """Import a Markdown source into canonical data and refresh retrieval lazily."""
+        if not isinstance(content, str):
+            raise ValueError("O conteúdo precisa ser texto Markdown.")
+        if find_credentials(content):
+            raise ValueError("A fonte parece conter senha, token ou chave privada; remova o segredo antes de importar.")
+        with self.operation_lock():
+            result = import_source_markdown(self.root, scope, relative_path, content)
+            if result["status"] == "imported":
+                self._index_schema_valid = False
+        return result
 
     def rebuild_semantic(self) -> int:
         """Create the optional vector index from canonical records and source files."""

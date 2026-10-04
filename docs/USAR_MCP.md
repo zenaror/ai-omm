@@ -7,7 +7,6 @@ O MCP conecta o assistente às ferramentas da OMM. Depois da conexão, também e
 1. Na pasta da OMM, inicie o serviço:
 
    ```sh
-   docker compose pull
    docker compose up -d
    ```
 
@@ -46,6 +45,14 @@ O comando mostra o que está pronto e o que precisa de atenção. Ele só confer
 O MCP fica disponível enquanto a OMM está ligada. Use `docker compose down` para desligá-la. `localhost` só funciona para programas no mesmo computador; assistentes hospedados na nuvem não conseguem acessá-lo diretamente.
 
 Para economizar contexto, `context` devolve um resumo curto e não inclui documentos-fonte automaticamente. Peça trechos apenas quando precisar conferir um documento.
+
+### Guardar um documento completo na OMM
+
+Quando o agente precisa trazer um Markdown inteiro para a memória compartilhada, ele pode usar a ferramenta MCP `import_source`. Ela grava o documento nos dados da OMM, em `sources/<projeto>/<caminho-original>`, e a busca passa a encontrá-lo. Exemplo: escopo `pkhex-linux` e caminho `docs/PORTING.md` viram `sources/pkhex-linux/docs/PORTING.md`.
+
+O agente precisa abrir o arquivo no projeto de origem e enviar o texto completo à ferramenta. O limite é 20 MiB por arquivo. A OMM recusa senhas, tokens e chaves detectados, e não sobrescreve um arquivo diferente que já exista. Se o destino já tiver exatamente o mesmo conteúdo, ela informa que nada mudou.
+
+Use essa ferramenta para documentos de referência que precisam continuar pesquisáveis, como regras, handoffs, roadmaps e relatórios. Ela não transforma uma lista de links em conteúdo importado. Para outros formatos, guarde uma versão Markdown quando isso preservar o conteúdo com fidelidade e registre a origem original no próprio documento.
 
 ## Busca semântica: procurar pelo assunto
 
@@ -102,17 +109,14 @@ Escreva o valor em `.env` ou nas variáveis da stack no Portainer. Se já usa `b
 
 O código da OMM e os dados ficam separados. `OMM_DATA_PATH` aponta para a pasta de dados, que contém memórias, skills e documentos. A busca é um índice reconstruível; ela não substitui esses arquivos.
 
-Para atualizar a aplicação, entre na pasta dela e execute:
+Para atualizar o código, entre na pasta da aplicação e execute:
 
 ```sh
 git pull --ff-only
-docker compose pull
-docker compose up -d
+docker compose up --build -d
 ```
 
-O Compose usa a imagem OCI publicada no GitHub Container Registry; isso evita precisar de um serviço de build no deploy. Com os dados em uma pasta persistente, atualizar a aplicação não apaga a memória. Se usar o perfil `backup`, acrescente-o aos dois comandos.
-
-Para construir a imagem a partir do código local, junte `-f compose.build.yaml` aos comandos do Compose, por exemplo: `docker compose -f compose.yaml -f compose.build.yaml up --build -d`.
+Com os dados em uma pasta persistente, atualizar a aplicação não apaga a memória.
 
 ## Backup no Git (opcional)
 
