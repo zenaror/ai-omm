@@ -47,6 +47,14 @@ O MCP fica disponível enquanto a OMM está ligada. Use `docker compose down` pa
 
 Para economizar contexto, `context` devolve um resumo curto e não inclui documentos-fonte automaticamente. Peça trechos apenas quando precisar conferir um documento.
 
+### Guardar um documento completo na OMM
+
+Quando o agente precisa trazer um Markdown inteiro para a memória compartilhada, ele pode usar a ferramenta MCP `import_source`. Ela grava o documento nos dados da OMM, em `sources/<projeto>/<caminho-original>`, e a busca passa a encontrá-lo. Exemplo: escopo `pkhex-linux` e caminho `docs/PORTING.md` viram `sources/pkhex-linux/docs/PORTING.md`.
+
+O agente precisa abrir o arquivo no projeto de origem e enviar o texto completo à ferramenta. O limite é 20 MiB por arquivo. A OMM recusa senhas, tokens e chaves detectados, e não sobrescreve um arquivo diferente que já exista. Se o destino já tiver exatamente o mesmo conteúdo, ela informa que nada mudou.
+
+Use essa ferramenta para documentos de referência que precisam continuar pesquisáveis, como regras, handoffs, roadmaps e relatórios. Ela não transforma uma lista de links em conteúdo importado. Para outros formatos, guarde uma versão Markdown quando isso preservar o conteúdo com fidelidade e registre a origem original no próprio documento.
+
 ## Busca semântica: procurar pelo assunto
 
 A busca comum encontra palavras que aparecem na anotação. A busca semântica tenta encontrar **o mesmo assunto, mesmo quando a pergunta usa outras palavras**. Por exemplo, “como evito perder decisões entre conversas?” pode encontrar uma anotação sobre memória compartilhada. Ela ajuda a procurar; não garante que entendeu certo. Confira a anotação e sua origem antes de confiar nela.
@@ -84,6 +92,14 @@ A OMM conversa com o Ollama por dentro da rede Docker. A porta 11434 não fica a
 Na primeira busca de cada escopo (global ou projeto), a OMM prepara os vetores daquele escopo e guarda os já preparados para os outros. Essa primeira preparação pode demorar; depois, ela reaproveita os vetores e só atualiza o que mudou. No MCP, `semantic_search` responde `status=building` enquanto prepara o índice, em vez de manter a conversa esperando. Consulte `semantic_index_status`; quando retornar `ready`, repita a busca. A busca normal continua disponível durante a preparação. `OMM_EMBEDDING_TIMEOUT=120` dá ao Ollama até dois minutos para responder a cada lote, inclusive quando ele precisa carregar ou aquecer o modelo. O modo de busca deve ser `all`, `memory` ou `sources`. Só a ferramenta `semantic_search` usa o Ollama; a busca normal continua local e não chama esse serviço. O texto das memórias e fontes é enviado ao Ollama local para gerar as comparações; não é enviado a um serviço externo por esta configuração. Se trocar o endereço por um serviço remoto, os textos sairão da sua rede. O modelo ocupa cerca de 622 MB e precisa de Ollama 0.11.10 ou mais recente ([detalhes do modelo](https://ollama.com/library/embeddinggemma)).
 
 Quando habilitada, o agente pode chamar `semantic_search` se a busca comum não encontrar algo que parece estar na memória. Na linha de comando, use `omm semantic-search "sua pergunta"`; para refazer manualmente o índice, use `omm semantic-rebuild`. Esses comandos da CLI esperam a reconstrução terminar.
+
+### Criar ou atualizar skills e papéis
+
+As skills ensinam um jeito reutilizável de trabalhar. Os papéis explicam a função de um especialista ou subagente. O agente pode consultar `list_skills` / `get_skill` e `list_roles` / `get_role`, e agora também gravar essas orientações com `save_skill` e `save_role`.
+
+Para criar, envie um nome e o texto completo. Skills precisam começar com metadados `name` e `description`; papéis podem usar subpastas, como `open-gbp/planner`. Para atualizar, leia o arquivo atual e copie o `sha256` devolvido na lista como `expected_sha256`. Assim, uma sessão antiga não apaga silenciosamente uma edição mais nova. O texto é validado para bloquear credenciais conhecidas e tem limite de 1 MiB.
+
+Essas ferramentas só alteram os dados persistentes da OMM, em `skills/` e `memory/roles/`. Elas não criam nem iniciam subagentes, não alteram a topologia automaticamente e não sincronizam o backup Git. Depois da edição, confira o resultado com `get_skill` ou `get_role`; o backup será sincronizado pelo procedimento normal quando você decidir.
 
 ## Perfis da stack
 
@@ -224,17 +240,41 @@ Essa senha protege o painel, mas não o MCP. Mantenha as conexões em uma rede p
 
 ### Proteger o MCP quando usar pela rede
 
-No mesmo computador, deixe `OMM_MCP_TOKEN` vazio. Para conexões MCP pela rede, crie uma chave longa:
+O token é opcional: sem ele, o MCP continua funcionando sem pedir uma chave. No mesmo computador, normalmente deixe `OMM_MCP_TOKEN` vazio. Se quiser exigir uma chave para usar o MCP pela rede, crie uma chave longa:
 
 ```sh
 python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
 ```
 
-Coloque a chave em `OMM_MCP_TOKEN` no `.env` da OMM e reinicie o serviço. O assistente também precisa enviar a mesma chave no cabeçalho `Authorization`. No Codex, configure a variável no ambiente em que o Codex é iniciado e use:
+Coloque a chave em `OMM_MCP_TOKEN` no `.env` da OMM e reinicie o serviço. Só então o assistente precisa enviar a mesma chave no cabeçalho `Authorization`. No Codex, configure a conexão para ler a variável `OMM_MCP_TOKEN` e use:
 
 ```sh
 codex mcp add omm --url http://SERVIDOR:8000/mcp --bearer-token-env-var OMM_MCP_TOKEN
 ```
+
+#### Codex Desktop no Linux
+
+Siga estas etapas somente se você ativou `OMM_MCP_TOKEN` na OMM. Sem token no servidor, não precisa configurar essa variável no Codex. Se você abre o Codex pelo menu de aplicativos, ele precisa receber a variável quando a sessão gráfica começa. Um `export` feito em um terminal só vale para aquele terminal e os programas abertos por ele; não atualiza um Codex que já está aberto.
+
+Para disponibilizar a variável aos aplicativos da sessão, abra um terminal e edite `/etc/environment`:
+
+```sh
+sudoedit /etc/environment
+```
+
+Acrescente esta linha, trocando o texto de exemplo pela chave da OMM:
+
+```text
+OMM_MCP_TOKEN=COLE_A_CHAVE_AQUI
+```
+
+Escreva somente `NOME=valor`, sem `export`. Salve o arquivo, saia da sessão do Linux e entre novamente. Fechar e reabrir apenas o Codex pode manter o ambiente antigo. Abra-o pelo atalho normal e confirme que as ferramentas da OMM aparecem. Para conferir a variável no terminal sem mostrar a chave:
+
+```sh
+if printenv OMM_MCP_TOKEN >/dev/null; then echo "Chave carregada"; else echo "Chave ausente"; fi
+```
+
+`/etc/environment` vale para todas as contas locais. Em um computador com outras pessoas, lembre-se de que a chave dá acesso de leitura e escrita à OMM. Se aparecer erro `401`, o servidor foi alcançado, mas a chave ausente ou incorreta não foi aceita.
 
 No Claude Code, use:
 

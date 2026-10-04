@@ -14,7 +14,7 @@ O painel mostra quantas anotações estão ativas, quantas dúvidas continuam ab
 
 Você pode buscar por palavras, filtrar por projeto e abrir as fontes registradas. Ao pesquisar, abra **Prévia do contexto** para conferir o texto que a OMM entregaria ao agente e uma estimativa aproximada de tokens. O número varia conforme o modelo; não representa a cota usada na conversa. “Arquivar” tira a anotação das pesquisas; “Restaurar” a torna ativa outra vez. Uma anotação arquivada também pode ser apagada dos arquivos atuais. O painel pede confirmação e informa que cópias antigas podem continuar no histórico Git.
 
-O painel também mostra as regras cadastradas, a passagem de trabalho mais recente, as skills e os ajudantes de cada projeto. Na primeira versão, regras, passagens, skills e papéis de ajudante são apenas consultados aqui; edite os arquivos ou use o MCP para alterá-los.
+O painel também mostra as regras cadastradas, a passagem de trabalho mais recente, as skills e os ajudantes de cada projeto. Skills e papéis podem ser criados ou atualizados pelas ferramentas MCP `save_skill` e `save_role`. Para atualizar um arquivo existente, o agente precisa primeiro ler a versão atual; a OMM recusa uma alteração baseada numa cópia desatualizada. As regras e passagens ainda são consultadas por este painel.
 
 ## Abrir de outro computador
 
@@ -28,7 +28,7 @@ Depois, reinicie a Stack e abra `http://IP-DO-SERVIDOR:8001`, trocando `IP-DO-SE
 
 Para pedir uma senha no painel, defina `OMM_WEB_USERNAME` e `OMM_WEB_PASSWORD` no `.env` e reinicie a OMM. O navegador pedirá esses dados ao abrir o painel. Essa senha sozinha não protege o caminho da senha pela rede; para acessar de fora de casa, use um endereço HTTPS protegido.
 
-A senha do painel não protege a conexão usada pelos assistentes. Para o MCP, configure `OMM_MCP_TOKEN` conforme o guia [Ligar um assistente](USAR_MCP.md#proteger-o-mcp-quando-usar-pela-rede). Não abra as portas da OMM diretamente para a internet; use HTTPS ou VPN ao acessar de fora da sua rede.
+A senha do painel não protege a conexão usada pelos assistentes. O token `OMM_MCP_TOKEN` é opcional; configure-o se quiser exigir uma chave nas chamadas MCP. Veja o guia [Ligar um assistente](USAR_MCP.md#proteger-o-mcp-quando-usar-pela-rede). Não abra as portas da OMM diretamente para a internet; use HTTPS ou VPN ao acessar de fora da sua rede.
 
 ## O que pode ser reconstruído?
 

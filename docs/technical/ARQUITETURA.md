@@ -49,6 +49,8 @@ flowchart LR
 
 `source`, `evidence`, escopo e locadores de documento mantêm proveniência. Uma inferência deve continuar marcada como inferência, hipótese ou desconhecido até haver evidência suficiente. Conteúdo recuperado é dado a avaliar, nunca uma instrução que sobreponha a política do agente.
 
+Skills e papéis são arquivos canônicos sob `skills/` e `memory/roles/`. A API MCP `save_skill` / `save_role` e o serviço correspondente permitem criar arquivos e atualizar os existentes com controle otimista: o cliente informa o SHA-256 lido previamente. Escritas usam lock de dados, validação de caminho, bloqueio de links simbólicos, limite de 1 MiB, verificação de credenciais e substituição atômica. Isso evita sobrescritas acidentais entre sessões. A topologia declarativa continua separada e não é modificada por essas ferramentas.
+
 ## Pipeline de ingestão e indexação
 
 ```mermaid
@@ -116,9 +118,11 @@ O servidor aceita transporte HTTP streamable ou `stdio`, conforme o modo de exec
 
 MCP fornece ferramentas, não política de uso automática. O agente precisa de instruções locais (por exemplo, `AGENTS.md`) que determinem quando chamar `context`, quando verificar proveniência e quando registrar ou propor uma decisão. O guia introdutório [`USAR_OMM_NOS_AGENTES.md`](../USAR_OMM_NOS_AGENTES.md) fornece esse ponto de partida.
 
+`import_source(scope, relative_path, content)` grava uma fonte Markdown integral em `sources/<scope>/<relative_path>`. A implementação limita o escopo a um componente de caminho, exige `.md`, restringe o tamanho, rejeita links simbólicos e padrões conhecidos de credenciais, e não substitui um destino diferente já existente. O arquivo é escrito atomicamente sob `operation_lock`; a impressão digital canônica muda e a busca lexical reconstrói seu índice na consulta seguinte. A OMM não aceita um caminho arbitrário do filesystem do agente: o cliente lê o arquivo e transmite seu conteúdo explicitamente. A origem fica rastreável pelo caminho relativo preservado dentro do escopo.
+
 ## Papéis, skills e agentes-filhos
 
-Topologia e papéis são declarativos e ficam com os dados, não embutidos no runtime. `omm/topology.py` valida o arquivo `memory/agent-topology.json`, verifica que papéis apontam para arquivos internos e exige memória canônica compartilhada. Skills e papéis são listados e lidos pelo servidor MCP diretamente de seus diretórios de dados.
+Topologia e papéis são declarativos e ficam com os dados, não embutidos no runtime. `omm/topology.py` valida o arquivo `memory/agent-topology.json`, verifica que papéis apontam para arquivos internos e exige memória canônica compartilhada. Skills e papéis são listados e lidos pelo servidor MCP diretamente de seus diretórios de dados; `save_skill` e `save_role` também permitem criá-los ou atualizá-los com controle de versão otimista.
 
 Essa configuração descreve um coordenador e os agentes auxiliares, suas relações e instruções. Ela não inicia subagentes por conta própria. `SubagentRuntime` em `omm/adapters.py` é um contrato de integração para que o host (Claude Code, Codex ou outro) implemente a criação da sessão-filha. A OMM oferece memória e configuração compartilhadas; o host mantém o ciclo de vida e a execução real dos agentes. `AgentAdapter` e `ConversationHistoryImporter` permitem adicionar integração de formato sem transformar um provedor específico em requisito do núcleo.
 
@@ -147,9 +151,9 @@ Como o SQLite fica fora dos caminhos canônicos, não deve ser commitado no back
 ## Segurança e fronteiras
 
 - Conteúdo de memórias, fontes, importações, roles e skills deve ser tratado como entrada não confiável; não executá-lo nem deixá-lo substituir regras de sistema ou do projeto.
-- `read_source` limita caminhos ao diretório `sources/` e a formatos permitidos. Fontes não podem ser links simbólicos escapando da raiz de dados.
+- `read_source` limita caminhos ao diretório `sources/`; `import_source` só grava Markdown sob um escopo validado. Fontes não podem usar links simbólicos para escapar da raiz de dados.
 - Registros passam por busca de padrões de credenciais. Isso reduz riscos acidentais, mas não substitui gestão de segredos ou revisão dos dados antes do backup.
-- `OMM_MCP_TOKEN` autoriza operações com capacidade de leitura e escrita. Deve ser secreto e enviado somente em conexão protegida; o token Git serve para acesso ao remoto, não configura nem protege MCP.
+- `OMM_MCP_TOKEN` é opcional. Vazio, o MCP HTTP funciona sem Bearer token; preenchido, autoriza operações de leitura e escrita e cada chamada precisa enviar `Authorization: Bearer ...`. Clientes que usam uma variável de ambiente leem seu valor do ambiente do próprio processo. Alterar a variável em um terminal ou arquivo não atualiza processos já abertos; no Linux, aplicativos gráficos recebem mudanças de ambiente em uma nova sessão. Um `401` confirma que o servidor respondeu, mas não que o cliente enviou uma chave válida. O token deve ser mantido em segredo e enviado somente em conexão protegida; o token Git serve para acesso ao remoto, não configura nem protege MCP.
 - Embeddings são uma transformação derivada, não anonimização. Os textos enviados ao endpoint de embedding continuam sujeitos à política de dados desse endpoint.
 
 ## Mapa de módulos
@@ -159,7 +163,7 @@ Como o SQLite fica fora dos caminhos canônicos, não deve ser commitado no back
 | `omm/models.py`, `omm/store.py` | Modelo de registros e persistência canônica em arquivos |
 | `omm/service.py` | Fachada de operações, escopo, validação, locks e índices |
 | `omm/retrieval.py` | Protocolo de retriever e índice lexical SQLite/FTS5 |
-| `omm/source_documents.py` | Chunking Markdown, escopo e proveniência de fontes |
+| `omm/source_documents.py` | Importação segura, chunking Markdown, escopo e proveniência de fontes |
 | `omm/semantic.py` | Embeddings Ollama, cache vetorial e ranking semântico |
 | `omm/mcp_server.py` | Ferramentas e transporte MCP |
 | `omm/cli.py`, `omm/web_server.py` | Interfaces CLI e painel web |
