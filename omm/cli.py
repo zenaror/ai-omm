@@ -46,6 +46,13 @@ def parser() -> argparse.ArgumentParser:
     source_search.add_argument("query")
     source_search.add_argument("--limit", type=int, default=6)
     source_search.add_argument("--scope", action="append", help="limitar aos projetos informados")
+    source_replace = sub.add_parser("source-replace", help="substituir um documento-fonte após conferir sua versão")
+    source_replace.add_argument("path", help="caminho completo, por exemplo sources/projeto/notas.md")
+    source_replace.add_argument("--file", type=Path, required=True, help="arquivo Markdown novo")
+    source_replace.add_argument("--expected-sha256", required=True, help="sha256 atual da fonte, obtido antes da edição")
+    source_delete = sub.add_parser("source-delete", help="remover um documento-fonte dos arquivos atuais")
+    source_delete.add_argument("path", help="caminho completo, por exemplo sources/projeto/notas.md")
+    source_delete.add_argument("--expected-sha256", required=True, help="sha256 atual da fonte, obtido antes da remoção")
     semantic = sub.add_parser("semantic-search", help="buscar por significado com o serviço opcional configurado")
     semantic.add_argument("query")
     semantic.add_argument("--mode", choices=["all", "memory", "sources"], default="all")
@@ -141,6 +148,26 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"id": hit.id, "scope": hit.scope, "heading": hit.heading,
                               "content": hit.content, "source": hit.source,
                               "authority": "locator_only"}, ensure_ascii=False))
+    elif args.command == "source-replace":
+        try:
+            result = omm.replace_source(args.path, args.file.read_text(encoding="utf-8"), args.expected_sha256)
+        except (OSError, ValueError) as exc:
+            print(f"Fonte não atualizada: {exc}", file=sys.stderr)
+            return 2
+        omm.rebuild()
+        print(json.dumps({**result, "search_index": "rebuilt",
+                          "git_history_note": "Versões anteriores podem permanecer em commits antigos."},
+                         ensure_ascii=False))
+    elif args.command == "source-delete":
+        try:
+            result = omm.delete_source(args.path, args.expected_sha256)
+        except (OSError, ValueError) as exc:
+            print(f"Fonte não removida: {exc}", file=sys.stderr)
+            return 2
+        omm.rebuild()
+        print(json.dumps({**result, "search_index": "rebuilt",
+                          "git_history_note": "Versões anteriores podem permanecer em commits antigos."},
+                         ensure_ascii=False))
     elif args.command == "semantic-search":
         print(json.dumps(omm.semantic_search(args.query, args.mode, args.limit, args.scope),
                          ensure_ascii=False, indent=2))

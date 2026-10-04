@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import base64
 import binascii
 from datetime import datetime
+import hashlib
 import hmac
 import json
 import math
@@ -169,7 +170,9 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
                      if line.lstrip().startswith("# ")),
                     path.stem.replace("-", " "),
                 )
-                project_sources.append({"path": relative, "title": first_heading})
+                project_sources.append({"path": relative, "title": first_heading,
+                                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                                        "bytes": path.stat().st_size})
         scoped_records = [r for r in active if r.scope == scope] if scope else []
         organization = {
             "scope": scope,
@@ -364,6 +367,21 @@ def make_handler(omm: OMM):
                 return
             if not self._same_origin():
                 self._send_json(403, {"error": "Pedido recusado: a página de origem não é a OMM."})
+                return
+            if urlsplit(self.path).path == "/api/sources":
+                try:
+                    size = int(self.headers.get("Content-Length", "0"))
+                    if size < 1 or size > 4096:
+                        raise ValueError("pedido inválido")
+                    payload = json.loads(self.rfile.read(size))
+                    result = omm.delete_source(payload.get("path", ""), payload.get("expected_sha256", ""))
+                    omm.rebuild()
+                    result["message"] = "Fonte removida dos arquivos atuais. Cópias em commits antigos do Git podem continuar existindo."
+                    self._send_json(200, result)
+                except FileNotFoundError:
+                    self._send_json(404, {"error": "Essa fonte não existe mais."})
+                except (ValueError, TypeError, json.JSONDecodeError, OSError) as exc:
+                    self._send_json(400, {"error": str(exc) or "Não foi possível remover a fonte."})
                 return
             match = re.fullmatch(r"/api/records/([A-Za-z0-9-]+)", urlsplit(self.path).path)
             if not match:

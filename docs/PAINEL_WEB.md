@@ -32,4 +32,10 @@ A senha do painel não protege a conexão usada pelos assistentes. O token `OMM_
 
 ## O que pode ser reconstruído?
 
-As anotações, regras e passagens são arquivos normais dentro de `memory/` e ficam no backup Git. O índice é recriado automaticamente ao iniciar o OMM. O painel só altera o estado da anotação; os arquivos canônicos continuam sendo a memória principal.
+As anotações, regras e passagens são arquivos normais dentro de `memory/` e ficam no backup Git. Os documentos importados também são arquivos normais em `sources/`. O índice é recriado automaticamente ao iniciar a OMM; ele é uma cópia de trabalho para acelerar buscas.
+
+# Revisar documentos importados
+
+No painel, escolha um projeto e abra **Materiais disponíveis**. A lista permite remover uma fonte dos arquivos atuais da OMM. O sistema pede confirmação e confere se o arquivo continua igual ao que foi listado.
+
+Remover uma fonte tira seu conteúdo das buscas atuais depois que o índice é reconstruído. **Isso não apaga versões antigas que já foram salvas no histórico do Git.** Se o documento só precisa de correção, use a ferramenta `replace_source` do MCP para salvar uma versão revisada no mesmo caminho.

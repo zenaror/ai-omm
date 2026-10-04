@@ -16,7 +16,8 @@ from .models import MemoryRecord
 from .retrieval import Retriever, SQLiteFTSRetriever
 from .redaction import find_credentials
 from .registries import save_role as save_role_file, save_skill as save_skill_file
-from .source_documents import SourceHit, import_source_markdown, read_source_chunks
+from .source_documents import (SourceHit, delete_source_markdown, import_source_markdown,
+                               read_source_chunks, replace_source_markdown)
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
 from .locking import data_lock
@@ -303,6 +304,25 @@ class OMM:
             result = import_source_markdown(self.root, scope, relative_path, content)
             if result["status"] == "imported":
                 self._index_schema_valid = False
+        return result
+
+    def replace_source(self, source: str, content: str,
+                       expected_sha256: str) -> dict[str, object]:
+        """Safely edit an existing Markdown source after checking its current hash."""
+        if not isinstance(content, str):
+            raise ValueError("O conteúdo precisa ser texto Markdown.")
+        if find_credentials(content):
+            raise ValueError("O novo conteúdo parece conter senha, token ou chave privada; remova o segredo antes de salvar.")
+        with self.operation_lock():
+            result = replace_source_markdown(self.root, source, content, expected_sha256)
+            self._index_schema_valid = False
+        return result
+
+    def delete_source(self, source: str, expected_sha256: str) -> dict[str, object]:
+        """Remove one source from current canonical files after a hash check."""
+        with self.operation_lock():
+            result = delete_source_markdown(self.root, source, expected_sha256)
+            self._index_schema_valid = False
         return result
 
     def save_skill(self, name: str, content: str,
