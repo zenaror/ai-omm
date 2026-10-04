@@ -15,6 +15,7 @@ from omm.models import MemoryRecord
 from omm.service import OMM
 from omm.semantic import SemanticSearchError
 from omm.topology import add_historical_source, load_topology
+from omm.source_documents import read_source_markdown
 from omm.history import HistoryImportError, accept_history, show_history_import, stage_history
 from omm.copilot_archive import import_copilot_chat
 from omm.claude_archive import import_claude_session
@@ -60,6 +61,17 @@ class OMMWorkflowTests(unittest.TestCase):
         self.omm.rebuild()
         self.assertEqual(self.omm.search_sources("NewNeedle", scopes=["demo"]), [])
         self.assertFalse(source.exists())
+
+    def test_read_source_returns_full_file_sha_for_guarded_edits(self):
+        source = self.root / "sources" / "demo" / "notes.md"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"# Safe note\n\nA short line.\n")
+
+        result = read_source_markdown(self.root, "sources/demo/notes.md", 1, 2)
+
+        self.assertEqual(result["content"], "# Safe note\n")
+        self.assertEqual(result["sha256"], hashlib.sha256(source.read_bytes()).hexdigest())
+        self.assertEqual(result["end_line"], 2)
 
     def test_topology_can_add_existing_historical_source_with_sha_guard(self):
         root = self.root / "topology-write"

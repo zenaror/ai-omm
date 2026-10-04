@@ -143,6 +143,32 @@ def _managed_source_path(root: Path, source: str) -> Path:
     return target
 
 
+def read_source_markdown(root: Path, source: str, start_line: int,
+                         end_line: int) -> dict[str, object]:
+    """Read a bounded source excerpt and expose the full-file digest for guarded edits."""
+    if start_line < 1 or end_line < start_line or end_line - start_line >= 80:
+        raise ValueError("Escolha um trecho de até 80 linhas.")
+    target = _managed_source_path(root, source)
+    raw = target.read_bytes()
+    if len(raw) > MAX_SOURCE_FILE_BYTES:
+        raise ValueError("A fonte é grande demais para abrir por esta ferramenta.")
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError("A fonte precisa estar em UTF-8 válido.") from exc
+    if start_line > len(lines):
+        raise ValueError("A linha inicial não existe nessa fonte.")
+    selected = "\n".join(lines[start_line - 1:end_line])
+    return {
+        "source": target.relative_to(root.resolve()).as_posix(),
+        "start_line": start_line,
+        "end_line": min(end_line, len(lines)),
+        "content": selected[:8000],
+        "truncated": len(selected) > 8000,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
 def replace_source_markdown(root: Path, source: str, content: str,
                             expected_sha256: str) -> dict[str, object]:
     """Replace one source only if its current content still matches the supplied hash."""

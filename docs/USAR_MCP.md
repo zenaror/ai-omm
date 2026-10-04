@@ -285,8 +285,9 @@ Troque `SERVIDOR` pelo nome ou endereço do computador. A chave dá acesso às f
 
 Use `search_sources` para localizar a fonte e confira o caminho. A edição e a remoção exigem o `sha256` atual da fonte; ele evita aplicar uma mudança sobre um arquivo que outra pessoa alterou enquanto você trabalhava.
 
-- Para corrigir ou sanear o documento, use `replace_source` com o caminho, o novo texto e o `expected_sha256` atual. O conteúdo novo é recusado se parecer conter senha, token ou chave privada.
-- Para tirar a fonte dos arquivos atuais, use `delete_source` com o caminho e o `expected_sha256` atual.
+- Primeiro use `read_source` no documento. A resposta traz um trecho e o SHA-256 do arquivo inteiro; esse código confirma que ninguém mudou o documento desde que você o leu.
+- Para corrigir ou sanear o documento, use `replace_source` com o caminho, o texto revisado e o SHA-256 retornado por `read_source`. O conteúdo novo é recusado se parecer conter senha, token ou chave privada.
+- Para tirar a fonte dos arquivos atuais, use `delete_source` com o caminho e o mesmo SHA-256 atual retornado por `read_source`.
 - Para incluir no perfil um histórico que já está em `sources/`, use `get_agent_topology` para ler o `sha256` e depois `add_historical_source`. Isso registra a conversa como referência histórica, não como agente.
 
 Apagar ou substituir o arquivo atual não remove versões antigas já guardadas no histórico Git. Uma limpeza completa desse histórico exige uma operação separada de reescrita do backup.
