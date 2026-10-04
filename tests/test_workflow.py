@@ -1,5 +1,6 @@
 import json
 import io
+import hashlib
 import os
 from pathlib import Path
 import sqlite3
@@ -13,7 +14,7 @@ from unittest.mock import patch
 from omm.models import MemoryRecord
 from omm.service import OMM
 from omm.semantic import SemanticSearchError
-from omm.topology import load_topology
+from omm.topology import add_historical_source, load_topology
 from omm.history import HistoryImportError, accept_history, show_history_import, stage_history
 from omm.copilot_archive import import_copilot_chat
 from omm.claude_archive import import_claude_session
@@ -33,6 +34,65 @@ class OMMWorkflowTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_source_replace_and_delete_require_current_sha_and_rebuild_search(self):
+        source = self.root / "sources" / "demo" / "notes.md"
+        source.parent.mkdir(parents=True)
+        source.write_text("# Old note\n\nOldNeedle private details.\n", encoding="utf-8")
+        self.omm.rebuild()
+        path = "sources/demo/notes.md"
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "mudou"):
+            self.omm.replace_source(path, "# Safe note\n\nNewNeedle sanitized.\n", "0" * 64)
+        with self.assertRaisesRegex(ValueError, "parece conter senha"):
+            self.omm.replace_source(path, "# Safe note\n\npassword=synthetic-secret-value\n",
+                                   hashlib.sha256(source.read_bytes()).hexdigest())
+        updated = self.omm.replace_source(path, "# Safe note\n\nNewNeedle sanitized.\n", digest)
+        self.assertEqual(updated["status"], "updated")
+        self.omm.rebuild()
+        self.assertEqual(self.omm.search_sources("OldNeedle", scopes=["demo"]), [])
+        self.assertEqual(self.omm.search_sources("NewNeedle", scopes=["demo"])[0].path, path)
+        new_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "mudou"):
+            self.omm.delete_source(path, digest)
+        deleted = self.omm.delete_source(path, new_digest)
+        self.assertEqual(deleted["status"], "deleted")
+        self.omm.rebuild()
+        self.assertEqual(self.omm.search_sources("NewNeedle", scopes=["demo"]), [])
+        self.assertFalse(source.exists())
+
+    def test_topology_can_add_existing_historical_source_with_sha_guard(self):
+        root = self.root / "topology-write"
+        (root / "memory" / "roles").mkdir(parents=True)
+        (root / "memory" / "roles" / "planner.md").write_text("role\n", encoding="utf-8")
+        (root / "sources" / "demo" / "historical-chats").mkdir(parents=True)
+        historical = root / "sources" / "demo" / "historical-chats" / "session.md"
+        historical.write_text("# Historical chat\n", encoding="utf-8")
+        config = {
+            "schema_version": 1,
+            "project_session_model": "multiple_workflow_sessions_shared_omm",
+            "workflow_session_model": "single_parent_with_subagents",
+            "coordinator_role": "coordinator", "shared_memory": "omm_canonical",
+            "subagents": [{"name": "planner", "role_file": "memory/roles/planner.md",
+                           "reports_to": "coordinator"}],
+            "project_profiles": {"demo": {"shared_scope": "demo", "agents": [
+                {"name": "demo-agent", "role_file": "memory/roles/planner.md"}]}}
+        }
+        topology_file = root / "memory" / "agent-topology.json"
+        topology_file.write_text(json.dumps(config), encoding="utf-8")
+        digest = hashlib.sha256(topology_file.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "mudou"):
+            add_historical_source(root, "demo", "Session", "Claude Code", "session-1",
+                                  "sources/demo/historical-chats/session.md", "Historical reference", "0" * 64)
+        result = add_historical_source(root, "demo", "Session", "Claude Code", "session-1",
+                                      "sources/demo/historical-chats/session.md", "Historical reference", digest)
+        self.assertEqual(result["status"], "added")
+        profile = load_topology(root)["project_profiles"]["demo"]
+        self.assertEqual(profile["historical_sources"][0]["session_id"], "session-1")
+        with self.assertRaisesRegex(ValueError, "registrada na topologia"):
+            add_historical_source(root, "demo", "Session", "Claude Code", "session-1",
+                                  "sources/demo/historical-chats/session.md", "Historical reference",
+                                  result["sha256"])
 
     def test_remember_search_context_handoff_and_rebuild(self):
         record = MemoryRecord(kind="observation", title="RAG migration",
@@ -241,6 +301,8 @@ class OMMWorkflowTests(unittest.TestCase):
         self.assertEqual(organization["shared_project_knowledge"][0]["name"], "Protocolo comum")
         self.assertEqual(dashboard_data(self.omm)["scope_labels"]["project-beta"], "Projeto Beta")
         self.assertEqual(organization["sources"][0]["title"], "Server notes")
+        self.assertEqual(organization["sources"][0]["sha256"],
+                         hashlib.sha256(source.read_bytes()).hexdigest())
 
         removed = self.omm.set_record_status(record.id, "retracted")
         self.assertEqual(removed.status, "retracted")

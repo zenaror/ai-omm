@@ -114,6 +114,89 @@ def import_source_markdown(root: Path, scope: str, relative_path: str,
             "bytes": len(encoded), "sha256": digest}
 
 
+def _managed_source_path(root: Path, source: str) -> Path:
+    """Resolve an existing Markdown file in sources without following links."""
+    if not isinstance(source, str) or not source or "\\" in source:
+        raise ValueError("Informe o caminho completo dentro de sources/, em formato Unix.")
+    relative = Path(source)
+    if (relative.is_absolute() or relative.suffix.lower() != ".md"
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or any(ord(char) < 32 for char in source)):
+        raise ValueError("O caminho precisa apontar para um Markdown dentro de sources/.")
+    data_root = root.resolve()
+    source_root = data_root / "sources"
+    target = data_root / relative
+    if relative.parts[:1] != ("sources",) or len(relative.parts) < 3:
+        raise ValueError("O caminho precisa ter o formato sources/<escopo>/<arquivo>.md.")
+    if (not source_root.is_dir() or source_root.is_symlink()
+            or source_root.resolve().parent != data_root):
+        raise FileNotFoundError("A pasta sources/ não existe ou não é segura.")
+    cursor = source_root
+    for part in relative.parts[1:-1]:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise ValueError("O caminho da fonte contém um link simbólico.")
+    if target.is_symlink():
+        raise ValueError("A fonte é um link simbólico e não foi alterada.")
+    if not target.is_file() or not target.resolve().is_relative_to(source_root.resolve()):
+        raise FileNotFoundError("Essa fonte não existe dentro de sources/.")
+    return target
+
+
+def replace_source_markdown(root: Path, source: str, content: str,
+                            expected_sha256: str) -> dict[str, object]:
+    """Replace one source only if its current content still matches the supplied hash."""
+    target = _managed_source_path(root, source)
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256 or ""):
+        raise ValueError("Informe o sha256 atual da fonte para confirmar a edição.")
+    current = target.read_bytes()
+    current_digest = hashlib.sha256(current).hexdigest()
+    if current_digest != expected_sha256.lower():
+        raise ValueError("A fonte mudou desde a leitura. Leia o sha256 atual antes de tentar de novo.")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("O novo conteúdo Markdown está vazio.")
+    try:
+        encoded = content.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("O conteúdo precisa estar em UTF-8 válido.") from exc
+    if len(encoded) > MAX_SOURCE_FILE_BYTES:
+        raise ValueError("A fonte excede o limite de 20 MiB.")
+    digest = hashlib.sha256(encoded).hexdigest()
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".omm-source-",
+                                         suffix=".tmp", delete=False) as temporary:
+            temporary_name = temporary.name
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(temporary_name, target.stat().st_mode & 0o777)
+        # Recheck immediately before replacement to prevent silent lost updates.
+        if hashlib.sha256(target.read_bytes()).hexdigest() != current_digest:
+            raise ValueError("A fonte mudou durante a edição. Nenhuma alteração foi aplicada.")
+        os.replace(temporary_name, target)
+    finally:
+        if temporary_name and os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+    return {"status": "updated", "source": source,
+            "bytes": len(encoded), "sha256": digest}
+
+
+def delete_source_markdown(root: Path, source: str,
+                           expected_sha256: str) -> dict[str, object]:
+    """Delete one source only after a caller confirms its current SHA-256."""
+    target = _managed_source_path(root, source)
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256 or ""):
+        raise ValueError("Informe o sha256 atual da fonte para confirmar a remoção.")
+    current = target.read_bytes()
+    digest = hashlib.sha256(current).hexdigest()
+    if digest != expected_sha256.lower():
+        raise ValueError("A fonte mudou desde a leitura. Leia o sha256 atual antes de tentar de novo.")
+    target.unlink()
+    return {"status": "deleted", "source": source,
+            "bytes": len(current), "sha256": digest}
+
+
 def read_source_chunks(root: Path, max_chars: int = MAX_CHUNK_CHARS) -> list[SourceChunk]:
     """Read only the explicit data-root/sources Markdown collection."""
     source_root = root / "sources"

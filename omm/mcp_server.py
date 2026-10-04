@@ -14,7 +14,7 @@ from .diagnostics import diagnose
 from .performance import measure_performance
 from .restore import RestoreError, resolve_restore_source, restore_on_start
 from .web_server import start_dashboard
-from .topology import load_topology
+from .topology import add_historical_source as add_topology_source, load_topology, topology_sha256
 from .source_documents import MAX_SOURCE_FILE_BYTES
 
 
@@ -40,6 +40,8 @@ def build_server(root: Path):
             "As mudanças vão para os dados canônicos da OMM (backup), não para o repositório da aplicação. "
             "Para guardar documentos completos em sources/, use import_source. Informe o escopo, o caminho original relativo e o texto Markdown. "
             "A ferramenta não sobrescreve fontes existentes e bloqueia credenciais detectadas; depois da importação, a busca lexical as encontra automaticamente. "
+            "Para corrigir ou remover uma fonte já guardada, use replace_source ou delete_source com o sha256 atual; a remoção do arquivo atual não apaga versões antigas do histórico Git. "
+            "Para registrar uma conversa histórica já importada no mapa de agentes, use add_historical_source com o sha256 devolvido por get_agent_topology. "
             "Para sugerir uma memória nova, use propose_memory: a pessoa revisa no painel, junto com possíveis semelhantes. "
             "Use remember só quando a pessoa pedir para salvar diretamente. Ao atualizar algo, marque a antiga como superseded. "
             "Guarde fatos verificados e decisões duradouras; use handoff ao passar um trabalho importante. "
@@ -176,6 +178,22 @@ def build_server(root: Path):
             if result["status"] == "already_present"
             else "Fonte importada para os dados canônicos da OMM. A busca será atualizada automaticamente."
         )
+        return result
+
+    @server.tool()
+    def replace_source(path: str, content: str, expected_sha256: str) -> dict:
+        """Atualiza uma fonte Markdown existente somente se o sha256 atual ainda conferir; bloqueia credenciais."""
+        result = omm.replace_source(path, content, expected_sha256)
+        result["message"] = "Fonte atualizada. A busca será reconstruída a partir do arquivo novo."
+        result["git_history_note"] = "Versões anteriores ainda podem existir em commits antigos do backup Git."
+        return result
+
+    @server.tool()
+    def delete_source(path: str, expected_sha256: str) -> dict:
+        """Remove uma fonte Markdown dos arquivos atuais após confirmar seu sha256."""
+        result = omm.delete_source(path, expected_sha256)
+        result["message"] = "Fonte removida dos arquivos atuais da OMM."
+        result["git_history_note"] = "Isso não apaga versões antigas já salvas no histórico do backup Git."
         return result
 
     @server.tool()
@@ -330,17 +348,29 @@ def build_server(root: Path):
         função nativa de subagentes do seu próprio aplicativo. Se o aplicativo
         não oferecer essa função, explique a limitação e continue na sessão
         central sem afirmar que ajudantes foram iniciados."""
-        topology = load_topology(omm.root)
+        with omm.operation_lock():
+            topology = load_topology(omm.root)
+            digest = topology_sha256(omm.root)
         profiles = topology.get("project_profiles", {})
         if scope:
             if scope not in profiles:
                 raise ValueError(f"Não há perfil de ajudantes para o escopo: {scope}")
-            return {"scope": scope, "profile": profiles[scope]}
+            return {"scope": scope, "profile": profiles[scope], "sha256": digest}
         return {"default_mode": topology.get("default_mode"),
                 "coordinator_role": topology.get("coordinator_role"),
                 "shared_memory": topology.get("shared_memory"),
                 "general_subagents": topology.get("subagents", []),
-                "project_scopes": sorted(profiles)}
+                "project_scopes": sorted(profiles), "sha256": digest}
+
+    @server.tool()
+    def add_historical_source(scope: str, name: str, platform: str, session_id: str,
+                              path: str, purpose: str, expected_sha256: str) -> dict:
+        """Adiciona ao perfil do projeto uma conversa histórica já importada, sem criar agente ativo."""
+        with omm.operation_lock():
+            result = add_topology_source(omm.root, scope, name, platform, session_id,
+                                         path, purpose, expected_sha256)
+        result["message"] = "Conversa histórica vinculada ao perfil. Ela não foi criada como agente ativo."
+        return result
 
     return server, omm
 
