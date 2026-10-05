@@ -34,6 +34,13 @@
     <p id="health" class="small-note" role="status">Verificando estado da busca e do backup…</p>
     <p class="small-note">“Sincronizar backup” salva suas alterações, busca as novidades do Git e envia o resultado. Se houver conflito, uma cópia local fica guardada em <code>memory/imports/sync-recovery</code>.</p>
 
+    <nav class="workspace-tabs" role="tablist" aria-label="Áreas da memória">
+      <button id="tab-memory" role="tab" type="button" aria-selected="true" aria-controls="view-memory" tabindex="0">Memória</button>
+      <button id="tab-review" role="tab" type="button" aria-selected="false" aria-controls="view-review" tabindex="-1">Revisão <span id="review-tab-count" class="tab-count">0</span></button>
+      <button id="tab-followup" role="tab" type="button" aria-selected="false" aria-controls="view-followup" tabindex="-1">Acompanhamento <span id="followup-tab-count" class="tab-count">0</span></button>
+    </nav>
+
+    <div id="view-followup" role="tabpanel" aria-labelledby="tab-followup" tabindex="0" hidden>
     <section id="open-questions" class="panel" aria-live="polite">
       <div class="section-heading open-questions-heading">
         <div><p class="eyebrow">ACOMPANHAMENTO</p><h2>Dúvidas em aberto <span id="open-questions-count" class="question-count"></span></h2><p>Veja a qual projeto cada dúvida pertence e filtre a lista.</p></div>
@@ -42,12 +49,18 @@
       <div id="open-question-list" class="open-question-list"></div>
     </section>
 
-    <section id="proposals-panel" class="panel hidden" aria-live="polite">
+    </div>
+
+    <div id="view-review" role="tabpanel" aria-labelledby="tab-review" tabindex="0" hidden>
+    <section id="proposals-panel" class="panel" aria-live="polite">
       <div class="section-heading"><div><p class="eyebrow">REVISÃO</p><h2 id="proposals-title">Sugestões de memória</h2><p>Confira o conteúdo e possíveis anotações parecidas antes de aprovar.</p></div></div>
       <div id="proposals" class="proposal-list"></div>
       <p id="proposal-limit" class="small-note hidden">Mostrando até 20 sugestões. Revise estas antes de carregar mais.</p>
     </section>
 
+    </div>
+
+    <div id="view-memory" role="tabpanel" aria-labelledby="tab-memory" tabindex="0">
     <section class="panel">
       <div class="section-heading"><div><p class="eyebrow">MEMÓRIA</p><h2>Anotações dos projetos</h2><p>Busque por assunto e confira a fonte antes de usar uma informação.</p></div></div>
       <div class="filters">
@@ -68,6 +81,8 @@
       <div class="section-heading"><div><p class="eyebrow">DOCUMENTOS-FONTE</p><h2>Trechos para consultar</h2><p>As linhas ajudam a encontrar a fonte original guardada na OMM.</p></div></div>
       <div id="sources" class="source-list"></div>
     </section>
+
+    </div>
 
     <div class="two-columns">
       <section class="panel compact-panel"><div class="section-heading"><div><p class="eyebrow">CONTINUIDADE</p><h2>Última passagem de trabalho</h2></div></div><div id="handoff" class="empty">Nenhuma passagem para este projeto.</div></section>

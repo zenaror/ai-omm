@@ -9,3 +9,12 @@
 @media(max-width:760px){.organization-grid{grid-template-columns:1fr}}
 .welcome-actions{display:flex;gap:8px;align-items:center}.refresh-button:disabled{opacity:.55;cursor:wait}
 .stat-card-link{color:inherit;text-decoration:none;transition:transform .15s,border-color .15s}.stat-card-link:hover{transform:translateY(-1px);border-color:#c9c3ff}.stat-card-link:focus-visible{outline:3px solid #c9c3ff;outline-offset:2px}.stat-card-link div small{display:block;margin-top:5px;color:var(--purple);font-size:11px;font-weight:600}.open-questions-heading{gap:16px;align-items:flex-end}.question-count{color:var(--muted);font:600 14px 'DM Sans',system-ui,sans-serif;letter-spacing:0}.open-question-list{display:grid;gap:10px;margin-top:18px}.open-question{border:1px solid var(--line);border-radius:12px;padding:15px 16px;background:#fff}.open-question-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.open-question-head h3{margin:0;font:700 15px Manrope,sans-serif;overflow-wrap:anywhere}.question-project{flex:none;border-radius:20px;padding:3px 10px;background:var(--purple-light);color:var(--purple);font-size:11px;font-weight:700}.open-question>p{margin:9px 0;color:#545368;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}.open-question-source{display:block;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.open-questions-heading .select-label{flex:none}@media(max-width:760px){.open-questions-heading{align-items:stretch;flex-direction:column}.open-questions-heading .select-label{width:100%;justify-content:space-between}.open-question-head{flex-direction:column;gap:7px}.question-project{white-space:normal}}
+
+[hidden]{display:none!important}
+.workspace-tabs{display:flex;gap:6px;margin-top:24px;padding:6px;background:var(--purple-light);border-radius:13px;flex-wrap:wrap}
+.workspace-tabs button{border:0;border-radius:9px;background:transparent;color:var(--muted);padding:11px 16px;font:inherit;font-weight:700;cursor:pointer;display:flex;gap:8px;align-items:center;justify-content:center;flex:1}
+.workspace-tabs button[aria-selected="true"]{background:var(--white);color:var(--purple);box-shadow:var(--shadow)}
+.workspace-tabs button:hover{color:var(--purple)}
+.workspace-tabs button:focus-visible,[role="tabpanel"]:focus-visible{outline:3px solid #c9c3ff;outline-offset:3px}
+.tab-count{background:#fff9;border-radius:20px;padding:1px 7px;font-size:12px}
+@media(max-width:480px){.workspace-tabs button{padding:10px 8px;font-size:12px;gap:4px}}

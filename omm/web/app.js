@@ -6,6 +6,38 @@ function size(bytes) { if(bytes<1024) return `${bytes} B`; if(bytes<1048576) ret
 function toast(message) { const node=$("toast"); node.textContent=message; node.classList.add("visible"); setTimeout(()=>node.classList.remove("visible"),2600); }
 function addOption(select,value,label) { const option=el("option",null,label); option.value=value; select.append(option); }
 function skillScopeLabel(scope){if(scope==="cross-project-domain")return "Compartilhada entre projetos";if(scope.startsWith("project:"))return "Específica deste projeto";if(scope==="global")return "Todos os projetos";return scope;}
+const workspaceTabs = ["memory", "review", "followup"];
+function selectWorkspaceTab(name, focus = false) {
+  if (!workspaceTabs.includes(name)) return;
+  for (const tab of workspaceTabs) {
+    const selected = tab === name, button = $("tab-" + tab);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    $("view-" + tab).hidden = !selected;
+  }
+  if (focus) $("tab-" + name).focus();
+}
+for (const [index, name] of workspaceTabs.entries()) {
+  const button = $("tab-" + name);
+  button.addEventListener("click", () => selectWorkspaceTab(name));
+  button.addEventListener("keydown", event => {
+    let next;
+    if (event.key === "ArrowRight") next = (index + 1) % workspaceTabs.length;
+    if (event.key === "ArrowLeft") next = (index + workspaceTabs.length - 1) % workspaceTabs.length;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = workspaceTabs.length - 1;
+    if (next !== undefined) { event.preventDefault(); selectWorkspaceTab(workspaceTabs[next], true); }
+  });
+}
+function openQuestionsFromLink() {
+  if (location.hash === "#open-questions") {
+    selectWorkspaceTab("followup");
+    $("open-questions").scrollIntoView({block: "start"});
+  }
+}
+window.addEventListener("hashchange", openQuestionsFromLink);
+document.querySelector('a[href="#open-questions"]').addEventListener("click", () => selectWorkspaceTab("followup"));
+openQuestionsFromLink();
 function render(data) {
   state.data=data; const s=data.summary;
   $("active-count").textContent=s.active_count; $("unknown-count").textContent=s.unknown_count;
@@ -17,6 +49,8 @@ function render(data) {
   const scopeSelect=$("scope"), old=scopeSelect.value; scopeSelect.replaceChildren(); addOption(scopeSelect,"","Todos os projetos");
   for(const scope of data.scopes) addOption(scopeSelect,scope,scope==="global"?"Conhecimento compartilhado":(data.scope_labels?.[scope]||scope));
   scopeSelect.value=data.scopes.includes(old)?old:"";
+  $("followup-tab-count").textContent = (data.open_questions || []).length;
+  $("review-tab-count").textContent = data.proposal_count || 0;
   renderOpenQuestions(data.open_questions||[], data.scope_labels||{});
   const records=$("records"); records.replaceChildren();
   if(!data.records.length) records.append(el("div","empty","Nenhuma anotação encontrada. Tente outra busca ou projeto."));
@@ -75,7 +109,7 @@ function renderOpenQuestions(items, labels){
   }
 }
 function renderSources(items, searched){const box=$("sources");box.replaceChildren();$("sources-panel").classList.toggle("hidden",!searched);if(!searched)return;if(!items.length){box.append(el("div","empty","Nenhum trecho de documento-fonte encontrado para esta busca."));return;}for(const item of items){const card=el("article","source-hit"),head=el("div","source-hit-head");head.append(el("strong",null,item.heading||item.source),el("span","scope-tag",item.scope));card.append(head,el("p",null,item.content+(item.truncated?"…":"")),el("small",null,"Localizador: "+item.source));box.append(card);}box.append(el("p","small-note","Estes trechos ajudam a localizar material. Abra a fonte e confira o contexto antes de usar como evidência."));}
-function renderProposals(items,total){const panel=$("proposals-panel"),box=$("proposals");box.replaceChildren();panel.classList.toggle("hidden",!total);$("proposals-title").textContent=`Sugestões de memória (${total})`;$("proposal-limit").classList.toggle("hidden",total<=items.length);for(const proposal of items){const memory=proposal.record,card=el("article","proposal-card"),head=el("div","record-head");head.append(el("h3",null,memory.title),el("span","scope-tag",memory.scope));card.append(head,el("p","proposal-content",memory.content));card.append(el("small","source","Origem: "+memory.source));if(memory.evidence?.length)card.append(el("small","source","Evidência: "+memory.evidence.join(" · ")));if(proposal.possible_matches?.length){card.append(el("strong","proposal-matches-title","Possíveis anotações parecidas"));for(const match of proposal.possible_matches){const matchCard=el("div","proposal-match");matchCard.append(el("strong",null,match.title),el("p",null,match.content),el("small",null,`${match.scope} · ${match.source}`));card.append(matchCard);}}else card.append(el("p","small-note","Nenhuma anotação parecida apareceu na busca textual."));const actions=el("div","proposal-actions"),approve=el("button","refresh-button proposal-approve","Aprovar e guardar"),reject=el("button","text-button proposal-reject","Recusar");approve.type=reject.type="button";approve.addEventListener("click",()=>reviewProposal(proposal,"approve"));reject.addEventListener("click",()=>reviewProposal(proposal,"reject"));actions.append(approve,reject);card.append(actions);box.append(card);}}
+function renderProposals(items,total){const panel=$("proposals-panel"),box=$("proposals");box.replaceChildren();if(!total)box.append(el("div","empty","Nenhuma sugestão aguardando revisão."));$("proposals-title").textContent=`Sugestões de memória (${total})`;$("proposal-limit").classList.toggle("hidden",total<=items.length);for(const proposal of items){const memory=proposal.record,card=el("article","proposal-card"),head=el("div","record-head");head.append(el("h3",null,memory.title),el("span","scope-tag",memory.scope));card.append(head,el("p","proposal-content",memory.content));card.append(el("small","source","Origem: "+memory.source));if(memory.evidence?.length)card.append(el("small","source","Evidência: "+memory.evidence.join(" · ")));if(proposal.possible_matches?.length){card.append(el("strong","proposal-matches-title","Possíveis anotações parecidas"));for(const match of proposal.possible_matches){const matchCard=el("div","proposal-match");matchCard.append(el("strong",null,match.title),el("p",null,match.content),el("small",null,`${match.scope} · ${match.source}`));card.append(matchCard);}}else card.append(el("p","small-note","Nenhuma anotação parecida apareceu na busca textual."));const actions=el("div","proposal-actions"),approve=el("button","refresh-button proposal-approve","Aprovar e guardar"),reject=el("button","text-button proposal-reject","Recusar");approve.type=reject.type="button";approve.addEventListener("click",()=>reviewProposal(proposal,"approve"));reject.addEventListener("click",()=>reviewProposal(proposal,"reject"));actions.append(approve,reject);card.append(actions);box.append(card);}}
 async function reviewProposal(proposal,action){const verb=action==="approve"?"guardar na memória de busca":"recusar";if(!confirm(`Deseja ${verb} “${proposal.record.title}”?`))return;try{const response=await fetch(`/api/proposals/${encodeURIComponent(proposal.id)}/review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível revisar a sugestão.");toast(data.message||"Sugestão revisada.");load();}catch(error){toast(error.message);}}
 function renderHandoff(item){const box=$("handoff");box.replaceChildren();if(!item){box.className="empty";box.textContent="Nenhuma passagem para este projeto.";return;}box.className="handoff-card";box.append(el("strong",null,item.status||"Em andamento"),el("p",null,item.summary||""));for(const [label,key] of [["Próximas ações","next_actions"],["Pendências","blockers"],["Perguntas","open_questions"]])if(item[key]?.length){box.append(el("strong",null,label));box.append(el("p",null,item[key].join(" · ")));}if(item.source)box.append(el("small",null,"Origem: "+item.source));}
 function renderPolicies(items){const box=$("policies");box.replaceChildren();if(!items.length){box.append(el("p","empty","Nenhuma regra cadastrada ainda."));return;}for(const item of items){const card=el("article","policy");card.append(el("strong",null,item.title||item.name||"Regra"),el("p",null,item.content||item.summary||item.rule||""));if(item.source)card.append(el("small",null,"Fonte: "+item.source));box.append(card);}}
