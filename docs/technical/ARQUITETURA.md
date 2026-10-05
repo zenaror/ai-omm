@@ -93,7 +93,7 @@ FTS responde à sobreposição de termos. Não entende sinonímia nem equivalên
 
 ### Embeddings semânticos
 
-Busca semântica é opt-in (`OMM_SEMANTIC_ENABLED=true`) e usa endpoint de embeddings compatível com Ollama, configurado em `OMM_EMBEDDING_URL`; o padrão do modelo é `embeddinggemma`. A integração envia até 32 textos por lote, normaliza vetores L2 e persiste suas representações JSON no mesmo SQLite derivado. Ela não chama um modelo gerador e não produz resposta textual: mede proximidade entre vetores de consulta e conteúdo.
+Busca semântica é opt-in (`OMM_SEMANTIC_ENABLED=true`) e usa endpoint de embeddings compatível com Ollama, configurado em `OMM_EMBEDDING_URL`; o padrão do modelo é `embeddinggemma`. A integração envia até 32 textos por lote, normaliza vetores L2 e persiste vetores float32 compactos no mesmo SQLite derivado. A tabela semântica guarda o SHA-256 do texto usado para reconhecer vetores reutilizáveis, sem duplicar o texto: trechos de fontes são recuperados da tabela lexical `source_chunks`. A busca não chama um modelo gerador nem produz resposta textual; mede proximidade entre vetores de consulta e conteúdo.
 
 Os escopos são barreiras de recuperação. Uma chamada limitada a um projeto pode consultar somente aquele escopo, ou combiná-lo com `global`. O índice registra fingerprints por escopo. Quando uma consulta semântica pede escopos explícitos, apenas esses escopos (e `global`, se solicitado pelo chamador) são comparados com o fingerprint e reconstruídos se necessário. Vetores de outros escopos são preservados. Uma reconstrução explícita sem filtro, como `omm semantic-rebuild`, cobre o corpus inteiro.
 
@@ -101,7 +101,7 @@ Na interface MCP, a geração de vetores desatualizados roda em segundo plano pa
 
 Cada vetor armazenado já está normalizado; o produto interno equivale à similaridade de cosseno. A implementação varre linearmente os vetores do tipo e escopo pedidos, usando um heap limitado a `k` itens para manter os melhores resultados. Assim, textos completos dos candidatos não são carregados todos na memória e não é necessário ordenar todo o conjunto, embora o custo de comparação continue O(N·d), onde N é o número de vetores no escopo e d a dimensão. Uma coleção muito grande poderá justificar índice ANN (por exemplo, HNSW), sem mudar a fonte canônica.
 
-`OMM_EMBEDDING_TIMEOUT` limita cada chamada ao serviço, com padrão de 120 segundos e teto interno também limitado. Os vetores dependem do modelo e do conteúdo; trocar o modelo invalida a identidade do índice semântico. Remover `.omm/index.sqlite3` elimina os vetores, não os dados. Uma nova busca ou `semantic-rebuild` os calcula novamente. Na configuração Compose, o Ollama permanece numa rede interna, com cloud desligada; textos são enviados ao endpoint configurado, então apontá-lo para outro host muda o limite de privacidade.
+`OMM_EMBEDDING_TIMEOUT` limita cada chamada ao serviço, com padrão de 120 segundos e teto interno também limitado. Os vetores dependem do modelo e do conteúdo; trocar o modelo invalida a identidade do índice semântico. Remover `.omm/index.sqlite3` elimina os vetores, não os dados. Uma nova busca ou `semantic-rebuild` os calcula novamente. `omm semantic-compact` converte índices antigos para o formato compacto sem chamar o serviço de embeddings e executa `VACUUM` para devolver páginas livres ao arquivo; ele só altera o índice derivado. Na configuração Compose, o Ollama permanece numa rede interna, com cloud desligada; textos são enviados ao endpoint configurado, então apontá-lo para outro host muda o limite de privacidade.
 
 ## Escopos e composição de contexto
 
@@ -180,9 +180,10 @@ Como o SQLite fica fora dos caminhos canônicos, não deve ser commitado no back
 - `omm doctor`: valida instalação e configuração local.
 - `omm rebuild`: refaz o índice lexical a partir dos arquivos canônicos.
 - `omm semantic-rebuild`: recalcula embeddings para os registros e fontes atuais.
+- `omm semantic-compact`: compacta vetores e remove texto duplicado do índice semântico sem recalcular embeddings.
 - `python3 benchmarks/retrieval_eval.py`: avaliação sintética da qualidade da busca lexical; use `--json` para automações e `--min-hit-rate-at-3` ou `--min-mrr-at-5` para reprovar uma execução abaixo da meta configurada.
 - `python3 benchmarks/performance_eval.py`: medição local de custos e latências em dados sintéticos.
 
 Relatórios de desempenho são observações daquele ambiente, não garantia de latência. A avaliação sintética não substitui corpus real nem revisão humana de relevância e proveniência.
 
-O relatório MCP `performance_report` também captura o tamanho do índice, a contagem de registros e blocos-fonte, estado/quantidade dos vetores semânticos e tempos mediano e p95 para painel, busca, contexto e, quando o índice semântico do escopo estiver atual, até três buscas semânticas com consulta genérica. Ele não inclui texto das memórias e não modifica os arquivos canônicos. Se o índice semântico estiver desatualizado, o relatório o informa e não dispara reconstrução cara; a atualização fica para uma consulta semântica ou reconstrução explícita.
+O relatório MCP `performance_report` captura o tamanho e a fragmentação estimada do SQLite, a quantidade total e ativa de registros, os blocos-fonte, o estado/quantidade dos vetores semânticos e tempos mínimo, mediano, p95 nearest-rank e máximo para painel, busca, busca em fontes e contexto. Usa 30 amostras por padrão; se o índice semântico do escopo estiver atual, também faz até três buscas semânticas com pergunta genérica. As medições são locais ao servidor e não incluem o tempo de rede/MCP. O relatório não inclui texto das memórias e não modifica arquivos canônicos. Se o índice semântico estiver desatualizado, informa e não dispara reconstrução cara.

@@ -229,8 +229,8 @@ def build_server(root: Path):
         return diagnose(omm)
 
     @server.tool()
-    def performance_report(repetitions: int = 5) -> dict:
-        """Mede operações locais sem devolver conteúdo; se habilitada e atual, faz até 3 buscas semânticas genéricas no Ollama."""
+    def performance_report(repetitions: int = 30) -> dict:
+        """Mede painel, buscas lexical/semântica e contexto local, sem devolver conteúdo; p95 usa nearest-rank."""
         return measure_performance(omm, repetitions)
 
     @server.tool()

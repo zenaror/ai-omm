@@ -92,6 +92,8 @@ Na primeira busca de cada escopo (global ou projeto), a OMM prepara os vetores d
 
 Quando habilitada, o agente pode chamar `semantic_search` se a busca comum não encontrar algo que parece estar na memória. Na linha de comando, use `omm semantic-search "sua pergunta"`; para refazer manualmente o índice, use `omm semantic-rebuild`. Esses comandos da CLI esperam a reconstrução terminar.
 
+Para reduzir o espaço ocupado pelo índice semântico que já existe, no terminal do LXC, dentro da pasta da stack, rode `docker compose exec -T omm python -m omm --root /data semantic-compact`. Ele não chama o Ollama nem altera as memórias ou fontes; só troca o formato dos vetores e remove cópias de texto que já estão na busca lexical. A compactação termina com uma reorganização do arquivo SQLite e pode usar espaço temporário durante essa etapa. Faça isso quando o serviço estiver saudável.
+
 ### Criar ou atualizar skills e papéis
 
 As skills ensinam um jeito reutilizável de trabalhar. Os papéis explicam a função de um especialista ou subagente. O agente pode consultar `list_skills` / `get_skill` e `list_roles` / `get_role`, e agora também gravar essas orientações com `save_skill` e `save_role`.
