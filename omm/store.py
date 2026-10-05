@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Iterable
@@ -55,6 +56,32 @@ class CanonicalStore:
                 temporary.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
                 temporary.replace(self.records_path)
                 return record
+        raise KeyError(record_id)
+
+    def replace_record_content(self, record_id: str, content: str,
+                               expected_sha256: str) -> MemoryRecord:
+        """Replace only the body of a non-active record after a SHA-256 check."""
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("content cannot be empty")
+        if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
+                or any(char not in "0123456789abcdef" for char in expected_sha256.lower())):
+            raise ValueError("expected_sha256 must be a 64-character SHA-256 digest")
+        records = list(self.records())
+        for record in records:
+            if record.id != record_id:
+                continue
+            if record.status == "active":
+                raise ValueError("active memory records cannot be redacted")
+            actual_sha256 = hashlib.sha256(record.content.encode("utf-8")).hexdigest()
+            if actual_sha256 != expected_sha256.lower():
+                raise ValueError("The memory record changed since it was reviewed")
+            record.content = content
+            record.validate()
+            lines = [item.to_json() for item in records]
+            temporary = self.records_path.with_suffix(".jsonl.tmp")
+            temporary.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            temporary.replace(self.records_path)
+            return record
         raise KeyError(record_id)
 
     def delete_retracted_record(self, record_id: str) -> MemoryRecord:
