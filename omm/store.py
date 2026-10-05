@@ -197,3 +197,20 @@ class CanonicalStore:
                                         for item in items) + "\n", encoding="utf-8")
         temporary.replace(self.proposals_path)
         return proposal
+
+    def update_proposals(self, updates: dict[str, str | None], status: str) -> None:
+        """Write a reviewed batch once; caller holds the operation lock."""
+        if status not in {"accepted", "rejected"}:
+            raise ValueError("proposal status must be accepted or rejected")
+        items = self.proposals()
+        reviewed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        for item in items:
+            if item.get("id") in updates and item.get("status") == "pending":
+                item["status"] = status
+                item["reviewed_at"] = reviewed_at
+                if updates[item["id"]]:
+                    item["record_id"] = updates[item["id"]]
+        temporary = self.proposals_path.with_suffix(".jsonl.tmp")
+        temporary.write_text("\n".join(json.dumps(item, ensure_ascii=False, sort_keys=True)
+                                        for item in items) + "\n", encoding="utf-8")
+        temporary.replace(self.proposals_path)
