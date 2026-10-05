@@ -12,6 +12,8 @@ http://localhost:8001
 
 O painel mostra quantas anotações estão ativas, quantas dúvidas continuam abertas, quanto espaço os arquivos ocupam e quantas skills estão disponíveis. Isso não mostra nem altera a cota do assistente de IA.
 
+Logo abaixo do resumo, a seção **Dúvidas em aberto** lista as anotações marcadas como dúvida. Cada cartão mostra o projeto; use o filtro **Projeto** nessa seção para ver um projeto específico. O cartão de dúvidas no resumo leva direto a essa lista.
+
 Você pode buscar por palavras, filtrar por projeto e abrir as fontes registradas. Ao pesquisar, abra **Prévia do contexto** para conferir o texto que a OMM entregaria ao agente e uma estimativa aproximada de tokens. O número varia conforme o modelo; não representa a cota usada na conversa. “Arquivar” tira a anotação das pesquisas; “Restaurar” a torna ativa outra vez. Uma anotação arquivada também pode ser apagada dos arquivos atuais. O painel pede confirmação e informa que cópias antigas podem continuar no histórico Git.
 
 O painel também mostra as regras cadastradas, a passagem de trabalho mais recente, as skills e os ajudantes de cada projeto. Skills e papéis podem ser criados ou atualizados pelas ferramentas MCP `save_skill` e `save_role`. Para atualizar um arquivo existente, o agente precisa primeiro ler a versão atual; a OMM recusa uma alteração baseada numa cópia desatualizada. As regras e passagens ainda são consultadas por este painel.

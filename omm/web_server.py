@@ -116,6 +116,17 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             "status": r.status, "created_at": r.created_at, "tags": r.tags,
         } for r in chosen[:200]]
 
+        open_questions = sorted(
+            (r for r in active if r.kind == "unknown"),
+            key=lambda record: record.created_at,
+            reverse=True,
+        )
+        open_question_items = [{
+            "id": r.id, "title": r.title, "content": r.content,
+            "source": r.source, "evidence": r.evidence, "scope": r.scope,
+            "created_at": r.created_at,
+        } for r in open_questions]
+
         kinds: dict[str, int] = {}
         by_scope: dict[str, int] = {}
         for r in active:
@@ -214,6 +225,7 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             "scopes": scopes,
             "scope_labels": scope_labels,
             "records": records,
+            "open_questions": open_question_items,
             "source_hits": source_hits,
             "context_preview": context_preview,
             "proposals": pending_proposals[:20],
