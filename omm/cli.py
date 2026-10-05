@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sqlite3
 import sys
 
 from .models import KINDS, MemoryRecord
@@ -59,6 +60,7 @@ def parser() -> argparse.ArgumentParser:
     semantic.add_argument("--limit", type=int, default=5)
     semantic.add_argument("--scope", action="append", help="limitar aos projetos informados")
     sub.add_parser("semantic-rebuild", help="recriar o índice semântico local")
+    sub.add_parser("semantic-compact", help="reduzir o espaço do índice semântico local sem recalcular vetores")
     context = sub.add_parser("context", help="preparar um resumo para passar a um assistente")
     context.add_argument("query")
     context.add_argument("--limit", type=int, default=5)
@@ -173,6 +175,13 @@ def main(argv: list[str] | None = None) -> int:
                          ensure_ascii=False, indent=2))
     elif args.command == "semantic-rebuild":
         print(f"Índice semântico recriado: {omm.rebuild_semantic()} itens")
+    elif args.command == "semantic-compact":
+        try:
+            result = omm.compact_semantic_index()
+        except (OSError, sqlite3.Error, RuntimeError, ValueError) as exc:
+            print(f"Índice semântico não compactado: {type(exc).__name__}", file=sys.stderr)
+            return 2
+        print(json.dumps(result, ensure_ascii=False))
     elif args.command == "context":
         state_scope = args.scope[-1] if args.scope else None
         sys.stdout.write(omm.context(args.query, args.limit, args.workstream_id, args.scope, state_scope,

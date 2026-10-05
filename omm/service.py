@@ -491,6 +491,13 @@ class OMM:
         return {"enabled": True, "status": status, "scopes": scopes,
                 "indexed_entries": entries, "error_type": job.get("error_type")}
 
+    def compact_semantic_index(self) -> dict[str, int | str | bool]:
+        """Compact only the disposable SQLite index; canonical memories stay untouched."""
+        with self.operation_lock():
+            semantic = self.semantic or OllamaSemanticIndex(
+                self.root / ".omm" / "index.sqlite3", endpoint="", model="")
+            return semantic.compact_storage()
+
     def semantic_search_nonblocking(self, query: str, mode: str = "all", limit: int = 5,
                                     scopes: list[str] | None = None) -> dict[str, object]:
         """MCP-friendly search that starts a cold index build without holding a request open."""

@@ -2,6 +2,11 @@ services:
   omm:
     image: ${OMM_IMAGE:-ghcr.io/zenaror/ai-omm:latest}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     environment:
       OMM_GIT_BACKUP_RESTORE: ${OMM_GIT_BACKUP_RESTORE:-true}
       OMM_GIT_BACKUP_REMOTE: ${OMM_GIT_BACKUP_REMOTE:-origin}
@@ -34,6 +39,11 @@ services:
     profiles: ["backup"]
     image: ${OMM_IMAGE:-ghcr.io/zenaror/ai-omm:latest}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     command: ["python", "-m", "omm.backup_worker", "--root", "/data"]
     environment:
       OMM_GIT_BACKUP_ENABLED: ${OMM_GIT_BACKUP_ENABLED:-false}
@@ -54,6 +64,11 @@ services:
     profiles: ["semantic"]
     image: ollama/ollama:latest
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     environment:
       OLLAMA_NO_CLOUD: "1"
     volumes:
@@ -63,6 +78,11 @@ services:
     profiles: ["semantic"]
     image: curlimages/curl:latest
     restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     depends_on:
       - ollama
     entrypoint: ["/bin/sh"]
