@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 from threading import Lock, RLock, Thread
 from time import monotonic
@@ -28,6 +29,8 @@ MAX_SOURCE_RESULTS = 20
 DEFAULT_CONTEXT_CHARS = 5000
 MAX_CONTEXT_CHARS = 12000
 INDEX_CHECK_INTERVAL_SECONDS = 10.0
+_REON_GID = re.compile(r"(?<![A-Za-z0-9])g[0-9]{9}(?![A-Za-z0-9])", re.IGNORECASE)
+_REON_GID_MARKER = "[REON ACCOUNT ID REMOVED]"
 
 
 class OMM:
@@ -227,6 +230,55 @@ class OMM:
             if record is None:
                 raise KeyError(record_id)
             return record
+
+    def get_record_digest(self, record_id: str) -> dict[str, str]:
+        """Return memory metadata and body digest without exposing the body."""
+        with self.operation_lock():
+            record = self._records_by_id().get(record_id)
+            if record is None:
+                raise KeyError(record_id)
+            return {
+                "id": record.id,
+                "scope": record.scope,
+                "status": record.status,
+                "content_sha256": hashlib.sha256(record.content.encode("utf-8")).hexdigest(),
+            }
+
+    def redact_record_content(self, record_id: str, redaction_rule: str,
+                              expected_sha256: str) -> dict[str, object]:
+        """Redact a supported identifier in a non-active record without returning its value."""
+        if redaction_rule != "reon_gid":
+            raise ValueError("redaction_rule must be reon_gid")
+        if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
+                or any(char not in "0123456789abcdef" for char in expected_sha256.lower())):
+            raise ValueError("expected_sha256 must be a 64-character SHA-256 digest")
+        with self.operation_lock():
+            record = self._records_by_id().get(record_id)
+            if record is None:
+                raise KeyError(record_id)
+            if record.status == "active":
+                raise ValueError("active memory records cannot be redacted")
+            actual_sha256 = hashlib.sha256(record.content.encode("utf-8")).hexdigest()
+            if actual_sha256 != expected_sha256.lower():
+                raise ValueError("The memory record changed since it was reviewed")
+            redacted_content, count = _REON_GID.subn(_REON_GID_MARKER, record.content)
+            if count == 0:
+                raise ValueError("No REON account ID matching the selected rule was found")
+            updated = MemoryRecord.from_json(record.to_json())
+            updated.content = redacted_content
+            self._validate_memory_input(updated)
+            self.store.replace_record_content(record_id, redacted_content, expected_sha256)
+            self._record_cache_signature = None
+            self._rebuild_index()
+            stored = self._records_by_id()[record_id]
+            return {
+                "id": stored.id,
+                "scope": stored.scope,
+                "status": stored.status,
+                "redaction_rule": redaction_rule,
+                "redacted_occurrences": count,
+                "content_sha256": hashlib.sha256(stored.content.encode("utf-8")).hexdigest(),
+            }
 
     def records(self) -> list[MemoryRecord]:
         """List canonical records, reusing the cache until the Git file changes."""
