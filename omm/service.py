@@ -373,7 +373,7 @@ class OMM:
         return result
 
     def redact_source_spans(self, source: str,
-                            spans: list[dict[str, int | str]],
+                            spans: list[dict[str, int]],
                             expected_sha256: str) -> dict[str, object]:
         """Redact selected source text by position without receiving its value."""
         with self.operation_lock():

@@ -209,7 +209,7 @@ def replace_source_markdown(root: Path, source: str, content: str,
 
 
 def redact_source_spans_markdown(root: Path, source: str,
-                                 spans: list[dict[str, int | str]],
+                                 spans: list[dict[str, int]],
                                  expected_sha256: str) -> dict[str, object]:
     """Redact selected 1-based character spans without returning source text."""
     target = _managed_source_path(root, source)
@@ -239,13 +239,9 @@ def redact_source_spans_markdown(root: Path, source: str,
         start_column = item.get("start_column")
         end_column = item.get("end_column")
         expected_length = item.get("expected_length")
-        expected_text_sha256 = item.get("expected_text_sha256")
         values = (line_number, start_column, end_column, expected_length)
         if any(type(value) is not int for value in values):
             raise ValueError("Linha, colunas e tamanho esperado precisam ser números inteiros.")
-        if not isinstance(expected_text_sha256, str) or not re.fullmatch(
-                r"[a-fA-F0-9]{64}", expected_text_sha256):
-            raise ValueError("Informe o sha256 do trecho para confirmar cada redação.")
         if (line_number < 1 or line_number > len(lines) or start_column < 1
                 or end_column < start_column or expected_length != end_column - start_column + 1):
             raise ValueError("Um trecho tem linha ou colunas inválidas.")
@@ -263,8 +259,6 @@ def redact_source_spans_markdown(root: Path, source: str,
             raise ValueError("O tamanho do trecho não confere.")
         if not selected.strip() or selected == "[DADO PESSOAL REDIGIDO]":
             raise ValueError("O trecho está vazio ou já foi redigido.")
-        if hashlib.sha256(selected.encode("utf-8")).hexdigest() != expected_text_sha256.lower():
-            raise ValueError("O trecho mudou desde a leitura. Nenhuma alteração foi aplicada.")
         by_line.setdefault(line_number, []).append(
             (start_column, end_column, expected_length)
         )

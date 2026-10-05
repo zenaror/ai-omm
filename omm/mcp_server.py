@@ -41,7 +41,7 @@ def build_server(root: Path):
             "Para guardar documentos completos em sources/, use import_source. Informe o escopo, o caminho original relativo e o texto Markdown. "
             "A ferramenta não sobrescreve fontes existentes e bloqueia credenciais detectadas; depois da importação, a busca lexical as encontra automaticamente. "
             "Para corrigir ou remover uma fonte já guardada, use read_source para obter o sha256 integral e passe-o a replace_source ou delete_source; a remoção do arquivo atual não apaga versões antigas do histórico Git. "
-            "Para redigir trechos pequenos sem reenviar o texto sensível, use redact_source_spans com o sha256 da fonte, posições de linha/coluna, tamanho e sha256 de cada trecho. "
+            "Para redigir trechos pequenos sem reenviar o texto sensível, use redact_source_spans com o sha256 da fonte e posições de linha/coluna com tamanho esperado. "
             "Para registrar uma conversa histórica já importada no mapa de agentes, use add_historical_source com o sha256 devolvido por get_agent_topology. "
             "Para juntar escopos de projeto, use merge_scope primeiro em modo de simulação; só execute depois de revisar a contagem e confirmar o plan_sha256 devolvido. "
             "Para sugerir uma memória nova, use propose_memory: a pessoa revisa no painel, junto com possíveis semelhantes. "
@@ -189,9 +189,9 @@ def build_server(root: Path):
         return result
 
     @server.tool()
-    def redact_source_spans(path: str, spans: list[dict[str, int | str]],
+    def redact_source_spans(path: str, spans: list[dict[str, int]],
                             expected_sha256: str) -> dict:
-        """Redige trechos sem receber seu texto: linha e colunas inclusivas começam em 1; informe tamanho e sha256 do trecho."""
+        """Redige trechos sem receber seu texto: linha e colunas inclusivas começam em 1; informe o tamanho em caracteres."""
         result = omm.redact_source_spans(path, spans, expected_sha256)
         result["message"] = "Trechos redigidos. A busca será reconstruída a partir da fonte atualizada."
         result["git_history_note"] = "Versões anteriores ainda podem existir em commits antigos do backup Git."
