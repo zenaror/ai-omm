@@ -131,6 +131,55 @@ class OMMWorkflowTests(unittest.TestCase):
         count = self.omm.rebuild()
         self.assertEqual(count, 1)
 
+    def test_redact_non_active_memory_by_digest_preserves_metadata_and_rebuilds_search(self):
+        record = MemoryRecord(
+            kind="fact", title="Old account note",
+            content="A synthetic test account g123456789 was recorded.",
+            source="history.md", scope="demo", evidence=["message 4"],
+            tags=["privacy"], created_by="agent", confidence="medium")
+        self.omm.remember(record)
+        self.omm.set_record_status(record.id, "superseded")
+
+        digest = self.omm.get_record_digest(record.id)
+        self.assertNotIn("content", digest)
+        self.assertEqual(digest["content_sha256"], hashlib.sha256(record.content.encode("utf-8")).hexdigest())
+        with self.assertRaisesRegex(ValueError, "changed since it was reviewed"):
+            self.omm.redact_record_content(record.id, "reon_gid", "0" * 64)
+
+        result = self.omm.redact_record_content(record.id, "reon_gid", digest["content_sha256"])
+        updated = self.omm.get_record(record.id)
+        self.assertEqual(result["redacted_occurrences"], 1)
+        self.assertEqual(result["status"], "superseded")
+        self.assertNotIn("g123456789", updated.content)
+        self.assertIn("[REON ACCOUNT ID REMOVED]", updated.content)
+        self.assertEqual(updated.id, record.id)
+        self.assertEqual(updated.title, record.title)
+        self.assertEqual(updated.source, record.source)
+        self.assertEqual(updated.scope, record.scope)
+        self.assertEqual(updated.evidence, record.evidence)
+        self.assertEqual(updated.tags, record.tags)
+        self.assertEqual(updated.created_by, record.created_by)
+        self.assertEqual(self.omm.search("g123456789", scopes=["demo"]), [])
+        self.assertEqual(self.omm.search("REON ACCOUNT ID REMOVED", scopes=["demo"])[0].id, record.id)
+
+    def test_memory_redaction_rejects_active_records_and_no_match(self):
+        active = MemoryRecord(kind="fact", title="Current note", content="Current account g987654321.",
+                              source="active.md", scope="demo")
+        self.omm.remember(active)
+        active_digest = self.omm.get_record_digest(active.id)["content_sha256"]
+        with self.assertRaisesRegex(ValueError, "active memory records"):
+            self.omm.redact_record_content(active.id, "reon_gid", active_digest)
+
+        no_match = MemoryRecord(kind="fact", title="Retired note", content="No account identifier here.",
+                                source="old.md", scope="demo")
+        self.omm.remember(no_match)
+        self.omm.set_record_status(no_match.id, "superseded")
+        digest = self.omm.get_record_digest(no_match.id)["content_sha256"]
+        with self.assertRaisesRegex(ValueError, "No REON account ID"):
+            self.omm.redact_record_content(no_match.id, "reon_gid", digest)
+        with self.assertRaisesRegex(ValueError, "redaction_rule"):
+            self.omm.redact_record_content(no_match.id, "arbitrary_regex", digest)
+
     def test_invalid_kind_is_rejected(self):
         with self.assertRaises(ValueError):
             self.omm.remember(MemoryRecord(kind="guess", title="x", content="y", source="z"))

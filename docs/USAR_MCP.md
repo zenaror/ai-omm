@@ -54,6 +54,14 @@ O agente precisa abrir o arquivo no projeto de origem e enviar o texto completo 
 
 Use essa ferramenta para documentos de referência que precisam continuar pesquisáveis, como regras, handoffs, roadmaps e relatórios. Ela não transforma uma lista de links em conteúdo importado. Para outros formatos, guarde uma versão Markdown quando isso preservar o conteúdo com fidelidade e registre a origem original no próprio documento.
 
+### Redigir um identificador em uma memória antiga
+
+Para conferir um registro sem abrir o texto, use a ferramenta MCP `get_memory_digest`. Ela devolve o ID, o escopo, o status e o SHA-256 do corpo, sem devolver o conteúdo.
+
+A ferramenta `redact_memory_content` aplica a regra `reon_gid`, que substitui ocorrências de um identificador REON no formato `g` seguido de nove dígitos por um marcador. Ela só aceita anotações que já não estejam ativas e exige o SHA-256 atual. O ID, o título, a origem, as evidências, os marcadores e o status permanecem iguais; só o corpo muda, e a busca lexical é reconstruída. A resposta informa a quantidade de ocorrências sem mostrar os valores.
+
+O conteúdo antigo deixa de existir nos arquivos canônicos atuais, mas commits anteriores do backup Git ainda podem guardá-lo. Depois da redação, verifique a busca e inclua a mudança no próximo sync coletivo.
+
 ## Busca semântica: procurar pelo assunto
 
 A busca comum encontra palavras que aparecem na anotação. A busca semântica tenta encontrar **o mesmo assunto, mesmo quando a pergunta usa outras palavras**. Por exemplo, “como evito perder decisões entre conversas?” pode encontrar uma anotação sobre memória compartilhada. Ela ajuda a procurar; não garante que entendeu certo. Confira a anotação e sua origem antes de confiar nela.
