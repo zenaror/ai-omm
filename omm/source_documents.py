@@ -208,6 +208,111 @@ def replace_source_markdown(root: Path, source: str, content: str,
             "bytes": len(encoded), "sha256": digest}
 
 
+def redact_source_spans_markdown(root: Path, source: str,
+                                 spans: list[dict[str, int | str]],
+                                 expected_sha256: str) -> dict[str, object]:
+    """Redact selected 1-based character spans without returning source text."""
+    target = _managed_source_path(root, source)
+    if not isinstance(expected_sha256, str) or not re.fullmatch(
+            r"[a-fA-F0-9]{64}", expected_sha256):
+        raise ValueError("Informe o sha256 atual da fonte para confirmar a redação.")
+    if not isinstance(spans, list) or not spans or len(spans) > 500:
+        raise ValueError("Informe de 1 a 500 trechos para redigir.")
+
+    current = target.read_bytes()
+    current_digest = hashlib.sha256(current).hexdigest()
+    if current_digest != expected_sha256.lower():
+        raise ValueError("A fonte mudou desde a leitura. Leia o sha256 atual antes de tentar de novo.")
+    if len(current) > MAX_SOURCE_FILE_BYTES:
+        raise ValueError("A fonte excede o limite de 20 MiB.")
+    try:
+        text = current.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("A fonte precisa estar em UTF-8 válido.") from exc
+
+    lines = text.splitlines(keepends=True)
+    by_line: dict[int, list[tuple[int, int, int]]] = {}
+    for item in spans:
+        if not isinstance(item, dict):
+            raise ValueError("Cada trecho precisa informar linha, colunas e tamanho esperado.")
+        line_number = item.get("line")
+        start_column = item.get("start_column")
+        end_column = item.get("end_column")
+        expected_length = item.get("expected_length")
+        expected_text_sha256 = item.get("expected_text_sha256")
+        values = (line_number, start_column, end_column, expected_length)
+        if any(type(value) is not int for value in values):
+            raise ValueError("Linha, colunas e tamanho esperado precisam ser números inteiros.")
+        if not isinstance(expected_text_sha256, str) or not re.fullmatch(
+                r"[a-fA-F0-9]{64}", expected_text_sha256):
+            raise ValueError("Informe o sha256 do trecho para confirmar cada redação.")
+        if (line_number < 1 or line_number > len(lines) or start_column < 1
+                or end_column < start_column or expected_length != end_column - start_column + 1):
+            raise ValueError("Um trecho tem linha ou colunas inválidas.")
+        line = lines[line_number - 1]
+        if line.endswith("\r\n"):
+            body = line[:-2]
+        elif line.endswith(("\n", "\r")):
+            body = line[:-1]
+        else:
+            body = line
+        if end_column > len(body):
+            raise ValueError("As colunas informadas passam do fim da linha.")
+        selected = body[start_column - 1:end_column]
+        if len(selected) != expected_length:
+            raise ValueError("O tamanho do trecho não confere.")
+        if not selected.strip() or selected == "[DADO PESSOAL REDIGIDO]":
+            raise ValueError("O trecho está vazio ou já foi redigido.")
+        if hashlib.sha256(selected.encode("utf-8")).hexdigest() != expected_text_sha256.lower():
+            raise ValueError("O trecho mudou desde a leitura. Nenhuma alteração foi aplicada.")
+        by_line.setdefault(line_number, []).append(
+            (start_column, end_column, expected_length)
+        )
+
+    marker = "[DADO PESSOAL REDIGIDO]"
+    for line_number, ranges in by_line.items():
+        ordered = sorted(ranges)
+        previous_end = 0
+        for start_column, end_column, _ in ordered:
+            if start_column <= previous_end:
+                raise ValueError("Os trechos de uma linha não podem se sobrepor.")
+            previous_end = end_column
+        line = lines[line_number - 1]
+        if line.endswith("\r\n"):
+            ending, body = "\r\n", line[:-2]
+        elif line.endswith(("\n", "\r")):
+            ending, body = line[-1], line[:-1]
+        else:
+            ending, body = "", line
+        for start_column, end_column, _ in reversed(ordered):
+            body = body[:start_column - 1] + marker + body[end_column:]
+        lines[line_number - 1] = body + ending
+
+    encoded = "".join(lines).encode("utf-8")
+    if len(encoded) > MAX_SOURCE_FILE_BYTES:
+        raise ValueError("A fonte excede o limite de 20 MiB.")
+    digest = hashlib.sha256(encoded).hexdigest()
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".omm-redact-",
+                                         suffix=".tmp", delete=False) as temporary:
+            temporary_name = temporary.name
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(temporary_name, target.stat().st_mode & 0o777)
+        if hashlib.sha256(target.read_bytes()).hexdigest() != current_digest:
+            raise ValueError("A fonte mudou durante a redação. Nenhuma alteração foi aplicada.")
+        os.replace(temporary_name, target)
+    finally:
+        if temporary_name and os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+    return {"status": "updated", "source": source,
+            "previous_sha256": current_digest,
+            "redacted_spans": len(spans), "redacted_lines": len(by_line),
+            "bytes": len(encoded), "sha256": digest}
+
+
 def delete_source_markdown(root: Path, source: str,
                            expected_sha256: str) -> dict[str, object]:
     """Delete one source only after a caller confirms its current SHA-256."""

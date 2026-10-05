@@ -18,7 +18,8 @@ from .retrieval import Retriever, SQLiteFTSRetriever
 from .redaction import find_credentials
 from .registries import save_role as save_role_file, save_skill as save_skill_file
 from .source_documents import (SourceHit, delete_source_markdown, import_source_markdown,
-                               read_source_chunks, replace_source_markdown)
+                               read_source_chunks, redact_source_spans_markdown,
+                               replace_source_markdown)
 from .scope_merge import ScopeMergeError, apply_scope_merge, build_scope_merge_plan
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
@@ -368,6 +369,17 @@ class OMM:
             raise ValueError("O novo conteúdo parece conter senha, token ou chave privada; remova o segredo antes de salvar.")
         with self.operation_lock():
             result = replace_source_markdown(self.root, source, content, expected_sha256)
+            self._index_schema_valid = False
+        return result
+
+    def redact_source_spans(self, source: str,
+                            spans: list[dict[str, int | str]],
+                            expected_sha256: str) -> dict[str, object]:
+        """Redact selected source text by position without receiving its value."""
+        with self.operation_lock():
+            result = redact_source_spans_markdown(
+                self.root, source, spans, expected_sha256
+            )
             self._index_schema_valid = False
         return result
 
