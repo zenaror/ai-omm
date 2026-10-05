@@ -42,6 +42,7 @@ def build_server(root: Path):
             "A ferramenta não sobrescreve fontes existentes e bloqueia credenciais detectadas; depois da importação, a busca lexical as encontra automaticamente. "
             "Para corrigir ou remover uma fonte já guardada, use read_source para obter o sha256 integral e passe-o a replace_source ou delete_source; a remoção do arquivo atual não apaga versões antigas do histórico Git. "
             "Para registrar uma conversa histórica já importada no mapa de agentes, use add_historical_source com o sha256 devolvido por get_agent_topology. "
+            "Para juntar escopos de projeto, use merge_scope primeiro em modo de simulação; só execute depois de revisar a contagem e confirmar o plan_sha256 devolvido. "
             "Para sugerir uma memória nova, use propose_memory: a pessoa revisa no painel, junto com possíveis semelhantes. "
             "Use get_memory_digest para conferir o hash de uma anotação sem abrir seu corpo. Para redigir IDs REON no formato g + 9 dígitos, use redact_memory_content com esse hash; a ferramenta só aceita registros não ativos, preserva metadados e refaz a busca lexical. Versões antigas podem permanecer no histórico Git do backup. "
             "Use remember só quando a pessoa pedir para salvar diretamente. Ao atualizar algo, marque a antiga como superseded. "
@@ -210,6 +211,12 @@ def build_server(root: Path):
         """Marca uma anotação como active, superseded, retracted ou unverified sem apagar sua origem."""
         record = omm.set_record_status(record_id, status)
         return f"Anotação {record.id}: status alterado para {record.status}."
+
+    @server.tool()
+    def merge_scope(source_scope: str, target_scope: str, dry_run: bool = True,
+                    expected_plan_sha256: str | None = None) -> dict:
+        """Simula ou confirma a união de dois escopos; executar exige o hash da simulação atual."""
+        return omm.merge_scope(source_scope, target_scope, dry_run, expected_plan_sha256)
 
     @server.tool()
     def handoff(status: str, summary: str, blockers: list[str] | None = None,

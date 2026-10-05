@@ -16,6 +16,7 @@ from .claude_archive import import_claude_session
 from .restore import RestoreError, restore_from_git
 from .sync import SyncError, preview_sync, sync_with_backup_report
 from .backup_worker import BackupError
+from .scope_merge import ScopeMergeError
 
 
 def parser() -> argparse.ArgumentParser:
@@ -54,6 +55,13 @@ def parser() -> argparse.ArgumentParser:
     source_delete = sub.add_parser("source-delete", help="remover um documento-fonte dos arquivos atuais")
     source_delete.add_argument("path", help="caminho completo, por exemplo sources/projeto/notas.md")
     source_delete.add_argument("--expected-sha256", required=True, help="sha256 atual da fonte, obtido antes da remoção")
+    merge_scope = sub.add_parser("merge-scope", help="unir os dados de um escopo de projeto em outro")
+    merge_scope.add_argument("source_scope", help="escopo que será incorporado")
+    merge_scope.add_argument("target_scope", help="escopo que continuará como nome canônico")
+    merge_mode = merge_scope.add_mutually_exclusive_group(required=True)
+    merge_mode.add_argument("--dry-run", action="store_true", help="mostrar a prévia sem alterar dados")
+    merge_mode.add_argument("--apply", action="store_true", help="executar após revisar a prévia")
+    merge_scope.add_argument("--expected-plan-sha256", help="hash integral devolvido pela simulação")
     semantic = sub.add_parser("semantic-search", help="buscar por significado com o serviço opcional configurado")
     semantic.add_argument("query")
     semantic.add_argument("--mode", choices=["all", "memory", "sources"], default="all")
@@ -170,6 +178,16 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({**result, "search_index": "rebuilt",
                           "git_history_note": "Versões anteriores podem permanecer em commits antigos."},
                          ensure_ascii=False))
+    elif args.command == "merge-scope":
+        try:
+            result = omm.merge_scope(args.source_scope, args.target_scope, args.dry_run,
+                                     args.expected_plan_sha256)
+        except (ScopeMergeError, OSError, ValueError) as exc:
+            print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result.get("status") == "blocked":
+            return 2
     elif args.command == "semantic-search":
         print(json.dumps(omm.semantic_search(args.query, args.mode, args.limit, args.scope),
                          ensure_ascii=False, indent=2))
