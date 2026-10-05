@@ -54,6 +54,12 @@
     <div id="view-review" role="tabpanel" aria-labelledby="tab-review" tabindex="0" hidden>
     <section id="proposals-panel" class="panel" aria-live="polite">
       <div class="section-heading"><div><p class="eyebrow">REVISÃO</p><h2 id="proposals-title">Sugestões de memória</h2><p>Confira o conteúdo e possíveis anotações parecidas antes de aprovar.</p></div></div>
+      <div class="proposal-bulk-actions">
+        <button id="approve-all" class="refresh-button proposal-approve" type="button" disabled>Aprovar todas</button>
+        <button id="reject-all" class="refresh-button" type="button" disabled>Recusar todas</button>
+        <span id="proposal-bulk-status" class="small-note" role="status"></span>
+      </div>
+      <p class="small-note">As ações incluem todas as sugestões do projeto selecionado e as compartilhadas, mesmo além das 20 exibidas.</p>
       <div id="proposals" class="proposal-list"></div>
       <p id="proposal-limit" class="small-note hidden">Mostrando até 20 sugestões. Revise estas antes de carregar mais.</p>
     </section>

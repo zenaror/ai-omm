@@ -204,6 +204,39 @@ class OMM:
             updated = self.store.update_proposal(proposal_id, "accepted" if approve else "rejected", record_id)
             return updated
 
+    def review_proposals(self, proposal_ids: list[str], approve: bool) -> dict:
+        """Review only the pending proposals in the caller's confirmed snapshot."""
+        if (not isinstance(proposal_ids, list) or not 1 <= len(proposal_ids) <= 10000
+                or any(not isinstance(item, str) or len(item) > 100 for item in proposal_ids)):
+            raise ValueError("Lista de sugestões inválida. Atualize a página e tente novamente.")
+        selected = set(proposal_ids)
+        with self.operation_lock():
+            pending = [p for p in self.store.proposals(True) if p.get("id") in selected]
+            records = []
+            if approve:
+                workstreams = {item["id"] for item in self.store.workstreams()}
+                for proposal in pending:
+                    record = MemoryRecord.from_json(json.dumps(proposal["record"], ensure_ascii=False))
+                    self._validate_memory_input(record)
+                    if record.workstream_id and record.workstream_id not in workstreams:
+                        raise ValueError("Uma sugestão aponta para uma frente de trabalho inexistente.")
+                    records.append(record)
+                self._ensure_index_current(force=True)
+                existing = set(self._records_by_id())
+                for record in records:
+                    if record.id not in existing:
+                        self.store.append(record)
+                        self.retriever.add(record)
+                        existing.add(record.id)
+                self.retriever.set_indexed_fingerprint(self._canonical_fingerprint())
+                self._last_index_check = monotonic()
+                self._index_file_signature = self._current_index_file_signature()
+                self._index_schema_valid = True
+            updates = {p["id"]: p["record"]["id"] if approve else None for p in pending}
+            if updates:
+                self.store.update_proposals(updates, "accepted" if approve else "rejected")
+            return {"reviewed": len(pending), "skipped": len(selected) - len(pending)}
+
     def set_record_status(self, record_id: str, status: str) -> MemoryRecord:
         with self.operation_lock():
             self._ensure_index_current(force=True)

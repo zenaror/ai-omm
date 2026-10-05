@@ -230,6 +230,7 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             "context_preview": context_preview,
             "proposals": pending_proposals[:20],
             "proposal_count": len(pending_proposals),
+            "proposal_ids": [item["id"] for item in pending_proposals],
             "organization": organization,
             "policies": [p for p in policies if not scope or p.get("scope", "default") == scope],
             "handoff": scoped_handoffs[-1] if scoped_handoffs else None,
@@ -320,6 +321,24 @@ def make_handler(omm: OMM):
                 return
             if not self._same_origin():
                 self._send_json(403, {"error": "Pedido recusado: a página de origem não é a OMM."})
+                return
+            if urlsplit(self.path).path == "/api/proposals/review-batch":
+                try:
+                    size = int(self.headers.get("Content-Length", "0"))
+                    if size < 1 or size > 512000:
+                        raise ValueError("Pedido inválido ou grande demais.")
+                    payload = json.loads(self.rfile.read(size))
+                    if not isinstance(payload, dict) or payload.get("action") not in {"approve", "reject"}:
+                        raise ValueError("Escolha aprovar ou recusar as sugestões.")
+                    approve = payload["action"] == "approve"
+                    result = omm.review_proposals(payload.get("ids"), approve)
+                    verb = "aprovadas" if approve else "recusadas"
+                    message = f"{result['reviewed']} sugestões {verb}."
+                    if result["skipped"]:
+                        message += f" {result['skipped']} já revisadas ou indisponíveis foram ignoradas."
+                    self._send_json(200, {**result, "message": message})
+                except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                    self._send_json(400, {"error": str(exc) or "Pedido inválido."})
                 return
             proposal_match = re.fullmatch(r"/api/proposals/([A-Za-z0-9-]+)/review", urlsplit(self.path).path)
             if proposal_match:

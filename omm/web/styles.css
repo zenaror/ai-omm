@@ -18,3 +18,5 @@
 .workspace-tabs button:focus-visible,[role="tabpanel"]:focus-visible{outline:3px solid #c9c3ff;outline-offset:3px}
 .tab-count{background:#fff9;border-radius:20px;padding:1px 7px;font-size:12px}
 @media(max-width:480px){.workspace-tabs button{padding:10px 8px;font-size:12px;gap:4px}}
+
+.proposal-bulk-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:18px}.proposal-bulk-actions .small-note{margin:0}
