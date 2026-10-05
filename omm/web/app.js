@@ -17,6 +17,7 @@ function render(data) {
   const scopeSelect=$("scope"), old=scopeSelect.value; scopeSelect.replaceChildren(); addOption(scopeSelect,"","Todos os projetos");
   for(const scope of data.scopes) addOption(scopeSelect,scope,scope==="global"?"Conhecimento compartilhado":(data.scope_labels?.[scope]||scope));
   scopeSelect.value=data.scopes.includes(old)?old:"";
+  renderOpenQuestions(data.open_questions||[], data.scope_labels||{});
   const records=$("records"); records.replaceChildren();
   if(!data.records.length) records.append(el("div","empty","Nenhuma anotação encontrada. Tente outra busca ou projeto."));
   for(const item of data.records){
@@ -45,6 +46,34 @@ function render(data) {
   renderSources(data.source_hits||[], Boolean($("search").value.trim()));
   renderHandoff(data.handoff); renderPolicies(data.policies); renderOrganization(data.organization);
 }
+function renderOpenQuestions(items, labels){
+  const select=$("question-scope"), selected=select.value, counts=new Map();
+  for(const item of items) counts.set(item.scope,(counts.get(item.scope)||0)+1);
+  select.replaceChildren();
+  addOption(select,"",`Todos os projetos (${items.length})`);
+  const scopes=[...counts.keys()].sort((a,b)=>(labels[a]||a).localeCompare(labels[b]||b,"pt-BR"));
+  for(const scope of scopes){
+    const label=scope==="global"?"Conhecimento compartilhado":scope==="default"?"Sem projeto":(labels[scope]||scope);
+    addOption(select,scope,`${label} (${counts.get(scope)})`);
+  }
+  select.value=counts.has(selected)?selected:"";
+  const visible=select.value?items.filter(item=>item.scope===select.value):items;
+  const box=$("open-question-list");box.replaceChildren();
+  $("open-questions-count").textContent=`(${visible.length})`;
+  if(!visible.length){
+    box.append(el("div","empty",items.length?"Nenhuma dúvida neste projeto.":"Nenhuma anotação marcada como dúvida está em aberto."));
+    return;
+  }
+  for(const item of visible){
+    const card=el("article","open-question"),head=el("div","open-question-head");
+    const project=item.scope==="global"?"Conhecimento compartilhado":item.scope==="default"?"Sem projeto":(labels[item.scope]||item.scope);
+    head.append(el("h3",null,item.title),el("span","question-project",project));
+    card.append(head,el("p",null,item.content));
+    const meta=el("small","open-question-source","Fonte: "+item.source);
+    if(item.created_at)meta.append(document.createTextNode(" · "+new Date(item.created_at).toLocaleDateString("pt-BR")));
+    card.append(meta);box.append(card);
+  }
+}
 function renderSources(items, searched){const box=$("sources");box.replaceChildren();$("sources-panel").classList.toggle("hidden",!searched);if(!searched)return;if(!items.length){box.append(el("div","empty","Nenhum trecho de documento-fonte encontrado para esta busca."));return;}for(const item of items){const card=el("article","source-hit"),head=el("div","source-hit-head");head.append(el("strong",null,item.heading||item.source),el("span","scope-tag",item.scope));card.append(head,el("p",null,item.content+(item.truncated?"…":"")),el("small",null,"Localizador: "+item.source));box.append(card);}box.append(el("p","small-note","Estes trechos ajudam a localizar material. Abra a fonte e confira o contexto antes de usar como evidência."));}
 function renderProposals(items,total){const panel=$("proposals-panel"),box=$("proposals");box.replaceChildren();panel.classList.toggle("hidden",!total);$("proposals-title").textContent=`Sugestões de memória (${total})`;$("proposal-limit").classList.toggle("hidden",total<=items.length);for(const proposal of items){const memory=proposal.record,card=el("article","proposal-card"),head=el("div","record-head");head.append(el("h3",null,memory.title),el("span","scope-tag",memory.scope));card.append(head,el("p","proposal-content",memory.content));card.append(el("small","source","Origem: "+memory.source));if(memory.evidence?.length)card.append(el("small","source","Evidência: "+memory.evidence.join(" · ")));if(proposal.possible_matches?.length){card.append(el("strong","proposal-matches-title","Possíveis anotações parecidas"));for(const match of proposal.possible_matches){const matchCard=el("div","proposal-match");matchCard.append(el("strong",null,match.title),el("p",null,match.content),el("small",null,`${match.scope} · ${match.source}`));card.append(matchCard);}}else card.append(el("p","small-note","Nenhuma anotação parecida apareceu na busca textual."));const actions=el("div","proposal-actions"),approve=el("button","refresh-button proposal-approve","Aprovar e guardar"),reject=el("button","text-button proposal-reject","Recusar");approve.type=reject.type="button";approve.addEventListener("click",()=>reviewProposal(proposal,"approve"));reject.addEventListener("click",()=>reviewProposal(proposal,"reject"));actions.append(approve,reject);card.append(actions);box.append(card);}}
 async function reviewProposal(proposal,action){const verb=action==="approve"?"guardar na memória de busca":"recusar";if(!confirm(`Deseja ${verb} “${proposal.record.title}”?`))return;try{const response=await fetch(`/api/proposals/${encodeURIComponent(proposal.id)}/review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível revisar a sugestão.");toast(data.message||"Sugestão revisada.");load();}catch(error){toast(error.message);}}
@@ -56,4 +85,4 @@ async function changeStatus(item){const next=item.status==="active"?"retracted":
 async function deleteRecord(item){if(!confirm("Apagar esta anotação dos arquivos atuais? Esta ação não pode ser desfeita pelo painel. Cópias antigas ainda podem existir no histórico do Git."))return;try{const response=await fetch(`/api/records/${encodeURIComponent(item.id)}`,{method:"DELETE"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível apagar.");toast("Anotação apagada dos arquivos atuais.");load();}catch(error){toast(error.message);}}
 async function deleteSource(item){if(!confirm(`Remover “${item.path}” dos arquivos atuais da OMM? A fonte deixa de aparecer nas buscas. Versões anteriores podem continuar no histórico do Git.`))return;try{const response=await fetch("/api/sources",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:item.path,expected_sha256:item.sha256})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível remover a fonte.");toast("Fonte removida dos arquivos atuais.");load();}catch(error){toast(error.message);}}
 async function syncBackup(){if(!confirm("Sincronizar com o backup Git agora? A OMM vai salvar as alterações atuais, buscar atualizações e enviar a versão combinada."))return;const button=$("sync");button.disabled=true;try{const response=await fetch("/api/sync",{method:"POST"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível sincronizar.");toast(data.message||"Backup sincronizado.");load();}catch(error){toast(error.message);}finally{button.disabled=false;}}
-$("sync").addEventListener("click",syncBackup);$("refresh").addEventListener("click",load);$("scope").addEventListener("change",load);$("archived").addEventListener("change",load);$("search").addEventListener("input",()=>{clearTimeout(state.timer);state.timer=setTimeout(load,250);});load();
+$("sync").addEventListener("click",syncBackup);$("refresh").addEventListener("click",load);$("scope").addEventListener("change",load);$("question-scope").addEventListener("change",()=>renderOpenQuestions(state.data?.open_questions||[],state.data?.scope_labels||{}));$("archived").addEventListener("change",load);$("search").addEventListener("input",()=>{clearTimeout(state.timer);state.timer=setTimeout(load,250);});load();

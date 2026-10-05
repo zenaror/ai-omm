@@ -26,13 +26,21 @@
 
     <section class="stats" aria-label="Resumo da memória">
       <article class="stat-card"><span class="stat-icon lavender">✎</span><div><strong id="active-count">—</strong><span>anotações ativas</span></div></article>
-      <article class="stat-card"><span class="stat-icon peach">?</span><div><strong id="unknown-count">—</strong><span>dúvidas em aberto</span></div></article>
+      <a class="stat-card stat-card-link" href="#open-questions" aria-label="Ver dúvidas em aberto por projeto"><span class="stat-icon peach">?</span><div><strong id="unknown-count">—</strong><span>dúvidas em aberto</span><small>Ver por projeto ↓</small></div></a>
       <article class="stat-card"><span class="stat-icon mint">▤</span><div><strong id="memory-size">—</strong><span>memórias, skills e fontes</span></div></article>
       <article class="stat-card"><span class="stat-icon blue">✦</span><div><strong id="skill-count">—</strong><span>skills disponíveis</span></div></article>
     </section>
     <p class="small-note">O espaço é o tamanho dos arquivos guardados. Ele não mede a cota ou o uso do seu assistente de IA.</p>
     <p id="health" class="small-note" role="status">Verificando estado da busca e do backup…</p>
     <p class="small-note">“Sincronizar backup” salva suas alterações, busca as novidades do Git e envia o resultado. Se houver conflito, uma cópia local fica guardada em <code>memory/imports/sync-recovery</code>.</p>
+
+    <section id="open-questions" class="panel" aria-live="polite">
+      <div class="section-heading open-questions-heading">
+        <div><p class="eyebrow">ACOMPANHAMENTO</p><h2>Dúvidas em aberto <span id="open-questions-count" class="question-count"></span></h2><p>Veja a qual projeto cada dúvida pertence e filtre a lista.</p></div>
+        <label class="select-label"><span>Projeto</span><select id="question-scope" aria-label="Filtrar dúvidas por projeto"><option value="">Todos os projetos</option></select></label>
+      </div>
+      <div id="open-question-list" class="open-question-list"></div>
+    </section>
 
     <section id="proposals-panel" class="panel hidden" aria-live="polite">
       <div class="section-heading"><div><p class="eyebrow">REVISÃO</p><h2 id="proposals-title">Sugestões de memória</h2><p>Confira o conteúdo e possíveis anotações parecidas antes de aprovar.</p></div></div>
