@@ -109,11 +109,20 @@ Cada vetor armazenado já está normalizado; o produto interno equivale à simil
 
 `context` combina o estado corrente e registros lexicalmente relevantes. O formatador Markdown preserva título, tipo, origem, confiança e referências de evidência. O orçamento padrão é 5.000 caracteres e o limite máximo é 12.000. Fontes podem ser acrescentadas, em até dois trechos curtos, apenas se couberem no orçamento; a ferramenta permite desligar a inclusão. Recuperação sob demanda reduz o contexto enviado ao modelo e mantém documentos grandes fora do prompt quando não são necessários.
 
+### Unificação de escopos de projeto
+
+`merge_scope(source_scope, target_scope, dry_run=true)` prepara uma prévia sem gravar dados. A resposta inclui contagens, conflitos e um `plan_sha256` calculado a partir dos arquivos envolvidos. A execução exige `dry_run=false` e o mesmo hash; se algo mudar entre a prévia e a execução, a OMM exige outra simulação.
+
+A operação preserva IDs, conteúdo, status, proveniência e histórico Git das anotações. Atualiza o campo de escopo, as tags `project:<escopo>`, handoffs, sugestões pendentes, políticas, skills e o perfil da topologia quando não existe um perfil de destino. Fontes de `sources/<origem>/` vão para `sources/<destino>/legacy-<origem>/`; referências a esses caminhos são ajustadas nos dados estruturados. Colisões com conteúdo diferente, links simbólicos e dois perfis de topologia existentes bloqueiam a execução. Ao concluir, a busca lexical é reconstruída e o índice semântico passa a ser reconhecido como desatualizado.
+
+Na CLI, a sequência é `omm merge-scope <origem> <destino> --dry-run`, seguida de `omm merge-scope <origem> <destino> --apply --expected-plan-sha256 <hash-da-prévia>`. O comando sempre retorna JSON. A execução é uma mudança nos dados canônicos; o backup Git registra a alteração na próxima sincronização configurada.
+
 ## MCP, painel e CLI
 
 `omm/mcp_server.py` expõe ferramentas MCP para:
 
 - leitura/gravação e revisão: `remember`, `propose_memory`, `list_memory_proposals`, `search`, `get_memory`, `set_memory_status`;
+- manutenção de escopos: `merge_scope` (prévia obrigatória com confirmação por hash);
 - retrieval e fontes: `search_sources`, `semantic_search`, `semantic_index_status`, `read_source`, `context`, `rebuild_index`;
 - coordenação e diagnóstico: `handoff`, `status`, `diagnose_setup`, `performance_report`;
 - extensões declarativas: `list_skills`, `get_skill`, `list_roles`, `get_role`, `get_agent_topology`.

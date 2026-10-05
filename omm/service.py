@@ -18,6 +18,7 @@ from .redaction import find_credentials
 from .registries import save_role as save_role_file, save_skill as save_skill_file
 from .source_documents import (SourceHit, delete_source_markdown, import_source_markdown,
                                read_source_chunks, replace_source_markdown)
+from .scope_merge import ScopeMergeError, apply_scope_merge, build_scope_merge_plan
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
 from .locking import data_lock
@@ -324,6 +325,22 @@ class OMM:
             result = delete_source_markdown(self.root, source, expected_sha256)
             self._index_schema_valid = False
         return result
+
+    def merge_scope(self, source_scope: str, target_scope: str, dry_run: bool = True,
+                    expected_plan_sha256: str | None = None) -> dict[str, object]:
+        """Move all project data from one scope into another after a guarded preview."""
+        with self.operation_lock():
+            if dry_run:
+                plan, _ = build_scope_merge_plan(self.root, source_scope, target_scope)
+                return plan
+            if not expected_plan_sha256:
+                raise ScopeMergeError("Execute primeiro a simulação e informe o plan_sha256 completo.")
+            result = apply_scope_merge(self.root, source_scope, target_scope, expected_plan_sha256)
+            self._record_cache_signature = None
+            self._index_schema_valid = False
+            result["indexed_records"] = self._rebuild_index()
+            result["source_chunks"] = self.retriever.source_chunk_count()
+            return result
 
     def save_skill(self, name: str, content: str,
                    expected_sha256: str | None = None) -> dict[str, object]:
