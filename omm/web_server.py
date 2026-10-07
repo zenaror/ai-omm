@@ -19,6 +19,7 @@ from .service import OMM
 from .topology import TopologyError, load_topology
 from .sync import SyncError, sync_with_backup
 from .backup_worker import BackupError
+from .skills import resolve_skill_chain, skill_catalog
 
 
 def _json_lines(path: Path) -> list[dict]:
@@ -33,16 +34,13 @@ def _json_lines(path: Path) -> list[dict]:
 
 def _skills(root: Path) -> list[dict]:
     result = []
-    for path in sorted((root / "skills").glob("*/SKILL.md")):
-        with path.open(encoding="utf-8") as stream:
-            content = stream.read(8192)
-        name = re.search(r"^name:\s*(.+)$", content, re.MULTILINE)
-        description = re.search(r"^description:\s*(.+)$", content, re.MULTILINE)
-        scope = re.search(r"^\s+scope:\s*(.+)$", content, re.MULTILINE)
+    for document in skill_catalog(root):
+        path = root / "skills" / document.name / "SKILL.md"
         result.append({
-            "name": name.group(1).strip() if name else path.parent.name,
-            "scope": scope.group(1).strip().strip("\"'") if scope else "não definido",
-            "description": description.group(1).strip()[:240] if description else "",
+            "name": document.name,
+            "scope": document.scope,
+            "description": document.description[:240],
+            "inherits": list(document.inherits),
             "source": path.relative_to(root).as_posix(),
         })
     return result
@@ -163,8 +161,25 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
                 applies = normalized_scope in activation or scope in agent.get("name", "")
                 if applies:
                     agents.append({**agent, "scope": scope})
-        applicable_skills = [item for item in skills
-                             if item["scope"] in {"global", "cross-project-domain", f"project:{scope}"}]
+        directly_applicable = [item for item in skills
+                               if item["scope"] in {"global", "cross-project-domain", f"project:{scope}"}]
+        inherited_by: dict[str, set[str]] = {}
+        if scope:
+            for item in directly_applicable:
+                try:
+                    chain = resolve_skill_chain(omm.root, item["name"])
+                except ValueError:
+                    continue
+                for ancestor in chain[:-1]:
+                    inherited_by.setdefault(ancestor.name, set()).add(item["name"])
+        skills_by_name = {item["name"]: item for item in skills}
+        applicable_names = {item["name"] for item in directly_applicable} | set(inherited_by)
+        applicable_skills = []
+        for name in sorted(applicable_names):
+            item = dict(skills_by_name[name])
+            item["inherited"] = name not in {skill["name"] for skill in directly_applicable}
+            item["inherited_by"] = sorted(inherited_by.get(name, set()))
+            applicable_skills.append(item)
         shared_knowledge = profile.get("shared_project_knowledge", [])
         project_sources = []
         selected_source_root = source_root / scope if scope in scopes and scope and source_root.exists() else None

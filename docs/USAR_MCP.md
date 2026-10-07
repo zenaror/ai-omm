@@ -108,6 +108,18 @@ As skills ensinam um jeito reutilizável de trabalhar. Os papéis explicam a fun
 
 Para criar, envie um nome e o texto completo. Skills precisam começar com metadados `name` e `description`; papéis podem usar subpastas, como `open-gbp/planner`. Para atualizar, leia o arquivo atual e copie o `sha256` devolvido na lista como `expected_sha256`. Assim, uma sessão antiga não apaga silenciosamente uma edição mais nova. O texto é validado para bloquear credenciais conhecidas e tem limite de 1 MiB.
 
+Uma skill pode herdar de outras declarando `metadata.inherits` no cabeçalho Markdown. Use uma lista de nomes de skills, por exemplo:
+
+```yaml
+metadata:
+  scope: project:meu-jogo
+  inherits:
+    - disassembly-geral
+    - gameboy-gbc
+```
+
+Ao chamar `get_skill` para o jogo, a OMM resolve a cadeia da base até a skill pedida e devolve o conteúdo combinado. Use `resolve_inheritance=false` apenas quando precisar ler o arquivo isolado. `list_skills` em um escopo de projeto também mostra os pais herdados. A gravação é recusada se houver pai inexistente ou ciclo de herança.
+
 Essas ferramentas só alteram os dados persistentes da OMM, em `skills/` e `memory/roles/`. Elas não criam nem iniciam subagentes, não alteram a topologia automaticamente e não sincronizam o backup Git. Depois da edição, confira o resultado com `get_skill` ou `get_role`; o backup será sincronizado pelo procedimento normal quando você decidir.
 
 ## Perfis da stack

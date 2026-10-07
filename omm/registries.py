@@ -9,6 +9,7 @@ import re
 import tempfile
 
 from .redaction import find_credentials
+from .skills import validate_skill_candidate
 
 MAX_REGISTRY_FILE_BYTES = 1024 * 1024
 _NAME_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
@@ -90,6 +91,7 @@ def save_skill(root: Path, name: str, content: str,
         raise ValueError("Nome inválido. Use letras, números, ponto, hífen ou sublinhado; sem pastas.")
     if not content.lstrip().startswith("---\n") or "\nname:" not in content or "\ndescription:" not in content:
         raise ValueError("Uma skill precisa começar com frontmatter Markdown contendo name: e description:.")
+    validate_skill_candidate(root, name, content)
     return _save(root, Path("skills") / name / "SKILL.md", content, expected_sha256)
 
 
