@@ -48,6 +48,8 @@ O Compose baixa a imagem pronta publicada no GitHub Container Registry. Para con
 
 Depois, configure o assistente para acessar `http://localhost:8000/mcp` e diga a ele quando consultar e atualizar a memória. Só conectar não faz o assistente usar a OMM automaticamente.
 
+Para entender o que cada ferramenta faz, consulte o [guia simples das ferramentas MCP](docs/FERRAMENTAS_MCP.md), com exemplos de consulta, memória, fontes, skills e handoffs.
+
 Siga o guia [Como usar a OMM nos agentes](docs/USAR_OMM_NOS_AGENTES.md). Para instruções de conexão, consulte [Ligar um assistente](docs/USAR_MCP.md). Também há guias para [Podman](docs/USAR_PODMAN.md) e [o painel web](docs/PAINEL_WEB.md).
 
 Por padrão, a OMM usa busca textual local. A busca semântica é opcional: em vez de exigir as mesmas palavras, ela tenta encontrar o mesmo assunto. Na stack Docker, o perfil opcional `semantic` inicia o Ollama e baixa um modelo pequeno para essa tarefa. Veja [como ativar](docs/USAR_MCP.md#busca-semântica-procurar-pelo-assunto). Agentes podem sugerir memórias para aprovação no painel.
