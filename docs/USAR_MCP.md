@@ -2,6 +2,8 @@
 
 O MCP conecta o assistente às ferramentas da OMM. Depois da conexão, também ensine o agente quando consultar e atualizar a memória. Veja o [guia curto para agentes](USAR_OMM_NOS_AGENTES.md).
 
+Veja também [cada ferramenta explicada com exemplos](FERRAMENTAS_MCP.md): o que faz, quando usar e quais cuidados tomar. Os exemplos são chamadas do assistente, não comandos de terminal.
+
 ## Caminho rápido
 
 1. Na pasta da OMM, inicie o serviço:
