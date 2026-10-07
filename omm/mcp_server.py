@@ -16,6 +16,7 @@ from .restore import RestoreError, resolve_restore_source, restore_on_start
 from .web_server import start_dashboard
 from .topology import add_historical_source as add_topology_source, load_topology, topology_sha256
 from .source_documents import read_source_markdown
+from .skills import read_skill, render_resolved_skill, resolve_skill_chain, skill_catalog
 
 
 def build_server(root: Path):
@@ -35,6 +36,7 @@ def build_server(root: Path):
             "Use semantic_search apenas quando busca por significado for útil e estiver habilitada. Os modos válidos são all, memory e sources. "
             "Se retornar status=building, use semantic_index_status para acompanhar; a busca lexical continua disponível durante a preparação. "
             "Use list_skills/list_roles para ver opções e abra só a skill ou papel necessário com get_skill/get_role. "
+            "Skills podem declarar pais em metadata.inherits; get_skill resolve e inclui a cadeia de pais antes da skill pedida. Use resolve_inheritance=false só para ler o arquivo original isolado. "
             "Para criar ou corrigir uma skill/papel, use save_skill/save_role. Leia o conteúdo atual antes de editar; "
             "a ferramenta recusa sobrescrever um arquivo diferente sem expected_sha256 igual ao hash atual. "
             "As mudanças vão para os dados canônicos da OMM (backup), não para o repositório da aplicação. "
@@ -264,37 +266,40 @@ def build_server(root: Path):
 
     @server.tool()
     def list_skills(scope: str | None = None) -> list[dict]:
-        """Lista as skills OMM compartilhadas ou limitadas a projetos."""
-        skills_root = omm.root / "skills"
+        """Lista skills do escopo e os pais herdados pelas skills específicas do projeto."""
+        documents = skill_catalog(omm.root)
+        by_name = {document.name: document for document in documents}
+        requested_scopes = {scope, f"project:{scope}"} if scope else set()
+        direct = [document for document in documents
+                  if scope is None or document.scope in requested_scopes or
+                  (scope == "global" and document.scope == "cross-project-domain")]
+        inherited_by: dict[str, set[str]] = {}
+        if scope:
+            for child in direct:
+                try:
+                    chain = resolve_skill_chain(omm.root, child.name)
+                except ValueError:
+                    continue
+                for ancestor in chain[:-1]:
+                    inherited_by.setdefault(ancestor.name, set()).add(child.name)
+        included = {document.name: document for document in direct}
+        included.update({name: by_name[name] for name in inherited_by if name in by_name})
         result = []
-        if not skills_root.exists():
-            return result
-        for path in sorted(skills_root.glob("*/SKILL.md")):
-            with path.open(encoding="utf-8") as stream:
-                text = stream.read(8192)
-            name = path.parent.name
-            name_match = re.search(r"^name:\s*(.+)$", text, re.MULTILINE)
-            description_match = re.search(r"^description:\s*(.+)$", text, re.MULTILINE)
-            scope_match = re.search(r"^\s+scope:\s*(.+)$", text, re.MULTILINE)
-            skill_scope = scope_match.group(1).strip().strip("\"'") if scope_match else "unspecified"
-            requested_scopes = {scope, f"project:{scope}"} if scope else set()
-            if scope is None or skill_scope in requested_scopes or (scope == "global" and skill_scope == "cross-project-domain"):
-                result.append({"name": name_match.group(1).strip() if name_match else name,
-                               "scope": skill_scope,
-                               "description": description_match.group(1).strip()[:240] if description_match else "",
-                               "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+        for document in sorted(included.values(), key=lambda item: item.name):
+            path = omm.root / "skills" / document.name / "SKILL.md"
+            result.append({"name": document.name, "scope": document.scope,
+                           "description": document.description[:240],
+                           "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                           "inherits": list(document.inherits),
+                           "inherited_by": sorted(inherited_by.get(document.name, set()))})
         return result
 
     @server.tool()
-    def get_skill(name: str) -> str:
-        """Abre as instruções de uma skill pelo nome da pasta, sem acessar arquivos fora de skills/."""
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
-            raise ValueError("Nome de skill inválido.")
-        path = (omm.root / "skills" / name / "SKILL.md").resolve()
-        skills_root = (omm.root / "skills").resolve()
-        if path.parent.parent != skills_root or not path.is_file():
-            raise ValueError(f"Skill não encontrada: {name}")
-        return path.read_text(encoding="utf-8")
+    def get_skill(name: str, resolve_inheritance: bool = True) -> str:
+        """Abre uma skill com a cadeia herdada; use false para ler só o arquivo original."""
+        if resolve_inheritance:
+            return render_resolved_skill(omm.root, name)
+        return read_skill(omm.root, name).content
 
     @server.tool()
     def save_skill(name: str, content: str, expected_sha256: str | None = None) -> dict:
