@@ -27,6 +27,8 @@ As seções seguintes cobrem as **31 ferramentas MCP** da aplicação. As ferram
 
 ### `context`
 
+O padrão MCP é 2.500 caracteres. Use `budget_chars` para ampliar quando necessário; o resumo sinaliza quando foi reduzido.
+
 Prepare um bilhete curto para retomar o projeto. Reúne memórias relevantes e o estado do trabalho.
 
 **O que acontece e o que conferir:** Consulta; não salva memórias. Por padrão não inclui trechos de documentos. Use um orçamento pequeno de texto e abra detalhes depois.
@@ -61,7 +63,7 @@ Procure palavras nas anotações escolhidas para a memória. Mostra resumos e ID
 
 ### `get_memory`
 
-Abra uma anotação inteira que encontrou na busca.
+Abra uma anotação inteira que encontrou na busca, ou leia somente o trecho necessário.
 
 **O que acontece e o que conferir:** Consulta. Use o ID completo retornado por search; um prefixo curto não basta. Também permite abrir registros antigos pelo ID.
 
@@ -70,6 +72,16 @@ Abra uma anotação inteira que encontrou na busca.
 ```json
 {
   "record_id": "ID_COMPLETO_DA_ANOTACAO"
+}
+```
+
+Para uma anotação longa, use `max_chars` (por exemplo, 2000). O resultado informa `total_chars`, `truncated`, `next_start_char` e o `content_sha256` do corpo inteiro. Continue com `start_char` igual a `next_start_char`; os offsets são caracteres Unicode, começando em zero. Se o hash mudar entre trechos, reinicie a leitura da nova versão. `next_start_char: null` indica o fim. Sem esses parâmetros, a chamada continua devolvendo a anotação inteira como antes. Os metadados e evidências permanecem completos.
+
+```json
+{
+  "record_id": "ID_COMPLETO_DA_ANOTACAO",
+  "start_char": 0,
+  "max_chars": 2000
 }
 ```
 
