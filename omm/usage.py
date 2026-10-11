@@ -90,6 +90,10 @@ class UsageRecorder:
             failed = True
             try:
                 result = function(*args, **kwargs)
+                # Memory reads use an ID rather than an input scope. Their
+                # returned metadata identifies the project without retaining text.
+                if scope == "_unspecified" and isinstance(result, dict) and "scope" in result:
+                    scope = self._scope({"scope": result["scope"]})
                 output_chars = self._size(result)
                 failed = False
                 return result
