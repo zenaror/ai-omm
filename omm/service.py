@@ -19,7 +19,7 @@ from .redaction import find_credentials
 from .registries import save_role as save_role_file, save_skill as save_skill_file
 from .source_documents import (SourceHit, delete_source_markdown, import_source_markdown,
                                read_source_chunks, redact_source_spans_markdown,
-                               replace_source_markdown)
+                               replace_source_markdown, patch_source_markdown)
 from .scope_merge import ScopeMergeError, apply_scope_merge, build_scope_merge_plan
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
@@ -405,6 +405,13 @@ class OMM:
             self._index_schema_valid = False
         return result
 
+    def patch_source(self, source: str, edits: list[dict], expected_sha256: str) -> dict[str, object]:
+        """Apply small source edits with the same lock and checks as full replacement."""
+        with self.operation_lock():
+            result = patch_source_markdown(self.root, source, edits, expected_sha256)
+            self._index_schema_valid = False
+            return result
+
     def redact_source_spans(self, source: str,
                             spans: list[dict[str, int]],
                             expected_sha256: str) -> dict[str, object]:
@@ -612,10 +619,26 @@ class OMM:
         with self.operation_lock():
             return self.store.workstreams()
 
-    def handoff(self, status: str, summary: str, blockers: list[str], questions: list[str], next_actions: list[str], actor: str, session_id: str | None = None, workstream_id: str | None = None, scope: str = "default") -> None:
+    def get_handoff(self, scope: str = "default", workstream_id: str | None = None) -> dict:
+        """Expose the complete current state and a stable digest for guarded updates."""
         with self.operation_lock():
             if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
                 raise ValueError(f"unknown workstream: {workstream_id}; create it first")
+            state = self.store.read_state(workstream_id, scope)
+            encoded = json.dumps({"scope": scope, "workstream_id": workstream_id, "state": state},
+                                 ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            return {"scope": scope, "workstream_id": workstream_id, "state": state,
+                    "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest()}
+
+    def handoff(self, status: str, summary: str, blockers: list[str], questions: list[str], next_actions: list[str], actor: str, session_id: str | None = None, workstream_id: str | None = None, scope: str = "default", expected_sha256: str | None = None) -> None:
+        with self.operation_lock():
+            if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
+                raise ValueError(f"unknown workstream: {workstream_id}; create it first")
+            if expected_sha256 is not None:
+                if not isinstance(expected_sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
+                    raise ValueError("Informe o sha256 atual devolvido por get_handoff.")
+                if self.get_handoff(scope, workstream_id)["sha256"] != expected_sha256.lower():
+                    raise ValueError("O handoff mudou desde a leitura. Leia get_handoff e mescle o estado antes de tentar novamente.")
             state = {
                 "schema_version": 1, "status": status, "summary": summary,
                 "blockers": blockers, "open_questions": questions, "next_actions": next_actions, "scope": scope,
