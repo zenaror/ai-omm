@@ -19,9 +19,24 @@ Você pode pedir em português: “Procure na OMM onde paramos no meu projeto”
 | Saber como trabalhar | `list_skills` → `get_skill` |
 | Saber quem faz o quê | `get_agent_topology`, `list_roles` → `get_role` |
 | Deixar o próximo passo | `handoff` |
+| Conferir uso e tamanho das chamadas | `usage_report` |
 | Investigar problema na instalação | `diagnose_setup` |
 
 As seções seguintes cobrem as **31 ferramentas MCP** da aplicação. As ferramentas disponíveis numa conexão podem variar com a versão instalada; depois de atualizar, reconecte o MCP.
+
+## Medir o uso
+
+### `usage_report`
+
+Mostra quanto texto passa pelas ferramentas MCP e quantas chamadas foram feitas.
+
+```json
+{"days": 7, "scope": "meu-projeto"}
+```
+
+O escopo é opcional. O relatório soma o período em UTC e mostra os 50 maiores grupos por ferramenta/projeto, incluindo falhas e tempos. Os totais incluem os grupos que ficaram fora da lista; `truncated=true` avisa o corte. Consulte um projeto específico para reduzir a resposta. A consulta ao relatório não conta a si mesma.
+
+**Limites:** são caracteres JSON e tempos internos, não tokens cobrados ou economia provada. Não inclui chamadas ao painel ou à CLI, tempo de rede, cache, descrições das ferramentas ou custos externos dos subagentes. Não guarda perguntas, respostas, senhas, mensagens de erro ou hashes de consultas. Não distingue clientes nem mede repetições. Os nomes de escopo são guardados; não coloque dados pessoais neles. Retém 30 dias por padrão em `.omm/usage.sqlite3`, fora do backup Git. A coleta começa nesta versão, sem histórico retroativo. Veja as [opções de coleta](USAR_OMM_NOS_AGENTES.md#medição-contínua-das-chamadas).
 
 ## Consultar o que já existe
 
@@ -269,6 +284,22 @@ Coloque um documento Markdown completo na biblioteca da OMM.
 }
 ```
 
+### `patch_source`
+
+Corrige um pequeno trecho sem enviar o documento inteiro novamente.
+
+**Como usar:** procure a fonte, leia o trecho com `read_source` e copie o SHA-256 devolvido. Informe o texto antigo exato e o novo. Cada texto antigo precisa aparecer uma única vez; inclua mais contexto se houver repetição. Todas as trocas usam a mesma versão original e são aplicadas juntas. Se a fonte mudou, nenhum trecho é salvo.
+
+```json
+{
+  "path": "sources/meu-projeto/ROADMAP.md",
+  "expected_sha256": "SHA_INTEGRAL_ATUAL",
+  "edits": [{"old_text": "- Etapa 2: pendente", "new_text": "- Etapa 2: concluída; evidência no commit abc123"}]
+}
+```
+
+Confira o trecho novamente com `read_source`. São permitidas até 50 trocas sem sobreposição, somando até 32.000 caracteres nos textos antigos e novos. O resultado inteiro passa pela proteção contra credenciais. Para trocar um documento inteiro, use `replace_source`. Para retirar segredos sem enviá-los novamente, use `redact_source_spans`. Versões antigas podem continuar no Git.
+
 ### `replace_source`
 
 Corrija um documento que já está na biblioteca, no mesmo caminho.
@@ -443,11 +474,23 @@ Ligue ao perfil do projeto uma conversa que já foi importada.
 
 ## Continuidade e organização dos projetos
 
+### `get_handoff`
+
+Abre o bilhete completo do projeto ou da frente de trabalho e devolve seu SHA-256. Use antes de gravar outro bilhete. `context` é resumido: pode não mostrar todas as pendências necessárias à mesclagem.
+
+```json
+{"scope": "meu-projeto", "workstream_id": "frente-existente"}
+```
+
+`workstream_id` é opcional. Quando informado, deve ser uma frente já criada. Use exatamente o mesmo escopo e a mesma frente ao gravar.
+
 ### `handoff`
 
 Deixe o bilhete de passagem: onde parou, bloqueios, perguntas e próximos passos.
 
 **O que acontece e o que conferir:** Grava uma passagem de trabalho. O novo handoff passa a representar o estado atual daquele escopo ou frente: leia o anterior e preserve o que ainda vale. As versões anteriores ficam registradas. Descobertas duradouras também merecem anotação própria.
+
+**Proteção contra outra sessão:** leia `get_handoff` e acrescente `expected_sha256` com o hash recebido. Se outra sessão atualizou o estado, a OMM recusa a gravação. Leia novamente, mescle e tente com o novo hash. Chamadas antigas sem hash continuam aceitas por compatibilidade, mas não têm essa proteção.
 
 **Exemplo de parâmetros:**
 

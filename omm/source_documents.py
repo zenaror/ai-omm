@@ -208,6 +208,49 @@ def replace_source_markdown(root: Path, source: str, content: str,
             "bytes": len(encoded), "sha256": digest}
 
 
+def patch_source_markdown(root: Path, source: str, edits: list[dict],
+                          expected_sha256: str) -> dict[str, object]:
+    """Apply bounded literal edits against one original snapshot, never sequentially."""
+    from .redaction import find_credentials
+
+    target = _managed_source_path(root, source)
+    if not isinstance(expected_sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
+        raise ValueError("Informe o sha256 integral atual da fonte.")
+    raw = target.read_bytes()
+    if len(raw) > MAX_SOURCE_FILE_BYTES:
+        raise ValueError("A fonte excede o limite de 20 MiB.")
+    if hashlib.sha256(raw).hexdigest() != expected_sha256.lower():
+        raise ValueError("A fonte mudou desde a leitura. Nenhuma edição foi aplicada.")
+    if not isinstance(edits, list) or not 1 <= len(edits) <= 50:
+        raise ValueError("Informe de 1 a 50 edições pequenas.")
+    text = raw.decode("utf-8")
+    replacements = []
+    total_chars = 0
+    for edit in edits:
+        if not isinstance(edit, dict) or set(edit) != {"old_text", "new_text"}:
+            raise ValueError("Cada edição precisa conter só old_text e new_text.")
+        old, new = edit["old_text"], edit["new_text"]
+        if not isinstance(old, str) or not old or not isinstance(new, str):
+            raise ValueError("old_text precisa ser texto não vazio; new_text precisa ser texto.")
+        total_chars += len(old) + len(new)
+        if total_chars > 32000:
+            raise ValueError("As edições excedem 32.000 caracteres. Use replace_source para trocas grandes.")
+        start = text.find(old)
+        if start < 0 or text.find(old, start + 1) >= 0:
+            raise ValueError("Cada old_text deve aparecer exatamente uma vez na fonte. Inclua mais contexto.")
+        replacements.append((start, start + len(old), new))
+    replacements.sort(key=lambda item: item[0])
+    if any(left[1] > right[0] for left, right in zip(replacements, replacements[1:])):
+        raise ValueError("As edições se sobrepõem. Nenhuma edição foi aplicada.")
+    for start, end, new in reversed(replacements):
+        text = text[:start] + new + text[end:]
+    if find_credentials(text):
+        raise ValueError("A fonte resultante parece conter credenciais. Redija os segredos antes de salvar.")
+    result = replace_source_markdown(root, source, text, expected_sha256)
+    result.update(status="patched", edits_applied=len(replacements))
+    return result
+
+
 def redact_source_spans_markdown(root: Path, source: str,
                                  spans: list[dict[str, int]],
                                  expected_sha256: str) -> dict[str, object]:
