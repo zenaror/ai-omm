@@ -1,5 +1,13 @@
 # Orientações para mudanças na OMM
 
+## Entrada do projeto
+
+- Este repositório mantém a aplicação One Mind Machine. As notas, fontes e skills dos usuários ficam na pasta de dados configurada, separada do código.
+- Quando houver conexão com a OMM, consulte o escopo `ai-omm` e a base comum com `get_role(name="project-base")`. Abra apenas as regras e skills necessárias; se a conexão faltar, informe a limitação e use as fontes deste repositório.
+- O mapa de arquivos e os comandos essenciais estão no README, em "Organização para desenvolver". Preserve os caminhos existentes; não crie cópias concorrentes de documentação ou configuração obrigatória de um cliente de IA.
+- Antes de editar, confira branch, HEAD e alterações locais. Ao fechar trabalho relevante, preserve evidências e atualize o handoff por SHA quando a OMM estiver disponível. Commit e push dependem da autorização da tarefa.
+- Cleanup só remove artefatos conhecidos e descartáveis da tarefa. Preserve a pasta de dados, originais, resultados únicos e trabalho de outras sessões; um arquivo ignorado pelo Git não é automaticamente descartável.
+
 ## Escrever para quem usa a OMM
 
 - Toda explicação destinada à pessoa que usa a OMM deve ser ELI5: simples o bastante para alguém sem experiência técnica conseguir começar.
