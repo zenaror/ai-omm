@@ -71,6 +71,23 @@ O backup em Git é opcional. Pode ficar apenas no computador ou ser enviado a Gi
 
 Para conferir a sincronização sem salvar ou enviar nada, use `docker compose exec -T omm python -m omm --root /data sync --dry-run`. Para sincronizar de verdade sem abrir o painel, retire `--dry-run` e acrescente `--json` se uma automação precisar ler o resultado. O [guia de backup](docs/USAR_MCP.md#sincronizar-pelo-terminal-ou-por-automacao) também mostra a versão para Podman e explica o que a simulação consegue conferir.
 
+## Organização para desenvolver
+
+Esta aplicação usa a seguinte organização. Outros projetos que usam a OMM podem manter caminhos equivalentes, como fontes RGBDS na raiz ou documentação em `doc/`.
+
+| Caminho | O que fica ali |
+| --- | --- |
+| `AGENTS.md` | Orientações curtas para os assistentes que trabalham no repositório. |
+| `omm/` | Código da aplicação, incluindo CLI, serviço e painel. |
+| `tests/` | Verificações existentes do comportamento da aplicação. |
+| `docs/` | Guias de uso e detalhes técnicos. |
+| `docs/technical/ARQUITETURA.md` | Organização interna e limites do sistema. |
+| `docs/technical/DECISOES.md` | Decisões de arquitetura. |
+
+A instalação básica está em "Comece em poucos minutos". Na raiz do repositório, `python3 -m omm --help` lista os comandos existentes. Para executar a suíte quando a tarefa exigir validação, use `python3 -m unittest discover -s tests -v`; documentar a organização não exige executar testes novos.
+
+As ferramentas de desenvolvimento podem estar na CLI e nos comandos de build: não é necessário criar uma pasta `tools/` vazia. Regras e skills compartilhadas ficam nos dados canônicos da OMM; configurações específicas de um assistente são opcionais. Preserve os resultados necessários para reproduzir o trabalho antes de remover saídas temporárias. Nunca trate a pasta de dados dos usuários como resíduo de compilação.
+
 ## Palavras que você pode encontrar
 
 - **Memória:** notas escolhidas para serem úteis em outras conversas.
