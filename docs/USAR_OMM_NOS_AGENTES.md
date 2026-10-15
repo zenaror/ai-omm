@@ -1,5 +1,9 @@
 # Como fazer um agente usar a OMM
 
+Para conferir revisões, interpretar erros e preservar um checkpoint quando o
+MCP faltar, siga [Continuidade e diagnóstico](CONTINUIDADE.md). Use os mesmos
+registros canônicos; não crie uma memória paralela no cliente.
+
 Conectar o MCP deixa as ferramentas disponíveis. Uma instrução curta ensina o agente quando usá-las. Pense no MCP como uma caixa de ferramentas e no `AGENTS.md` como um bilhete explicando quando abri-la.
 
 ```mermaid

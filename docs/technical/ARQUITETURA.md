@@ -1,5 +1,24 @@
 # Arquitetura da OMM
 
+## Continuidade e diagnóstico de execução
+
+O guia [Continuidade e diagnóstico](../CONTINUIDADE.md) descreve o fluxo com
+conexão e o checkpoint local pendente quando ela falta. Não há novo armazenamento
+de memória: o fallback é mesclado com o handoff canônico por CAS.
+
+`omm/errors.py` traduz falhas de execução para o `ToolError` previsto no SDK
+MCP, com código, recuperação e resultado de escrita conhecido ou incerto.
+Argumentos e texto bruto de exceções não são enviados nem registrados nesse
+diagnóstico; o log contém apenas operação, código e classe da exceção.
+`UsageRecorder` permanece dentro dessa fronteira e continua contando falhas.
+
+`get_handoff` conserva o SHA calculado somente sobre seleção e estado e
+acrescenta procedência e atualidade. A comparação de revisão é opcional e usa
+observações do cliente, não acesso ao checkout remoto. Campos opcionais
+`repository`, `branch`, `git_revision` estendem o estado existente sem migrar
+o histórico. Clientes antigos continuam válidos e leituras sem observação não
+certificam atualidade. Datas e status não são critérios automáticos de conclusão.
+
 Esta referência descreve a implementação atual da One Mind Machine (OMM). Ela é voltada a mantenedores e integradores que já conhecem conceitos como MCP, RAG, embeddings, índices invertidos e agentes.
 
 ## Modelo de dados e autoridade

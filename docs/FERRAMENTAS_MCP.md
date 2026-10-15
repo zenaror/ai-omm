@@ -474,7 +474,17 @@ Ligue ao perfil do projeto uma conversa que já foi importada.
 
 ## Continuidade e organização dos projetos
 
+Confira [Continuidade e diagnóstico](CONTINUIDADE.md) para comparar revisões,
+entender códigos de erro e preservar um checkpoint quando o MCP faltar.
+O SHA do handoff e o HEAD do Git são identidades diferentes.
+
 ### `get_handoff`
+
+Além de estado e SHA, devolve `provenance` e `freshness`. Os argumentos opcionais
+`observed_repository` e `observed_revision` comparam uma observação do cliente
+com os campos registrados; não consultam o Git remoto nem comprovam testes.
+Sem informação suficiente, o resultado é `not_verified`, inclusive para
+checkpoints antigos sem revisão estruturada. Data antiga não significa divergência.
 
 Abre o bilhete completo do projeto ou da frente de trabalho e devolve seu SHA-256. Use antes de gravar outro bilhete. `context` é resumido: pode não mostrar todas as pendências necessárias à mesclagem.
 
@@ -491,6 +501,10 @@ Deixe o bilhete de passagem: onde parou, bloqueios, perguntas e próximos passos
 **O que acontece e o que conferir:** Grava uma passagem de trabalho. O novo handoff passa a representar o estado atual daquele escopo ou frente: leia o anterior e preserve o que ainda vale. As versões anteriores ficam registradas. Descobertas duradouras também merecem anotação própria.
 
 **Proteção contra outra sessão:** leia `get_handoff` e acrescente `expected_sha256` com o hash recebido. Se outra sessão atualizou o estado, a OMM recusa a gravação. Leia novamente, mescle e tente com o novo hash. Chamadas antigas sem hash continuam aceitas por compatibilidade, mas não têm essa proteção.
+
+`handoff` também aceita `repository`, `branch` e `git_revision` opcionais.
+Informe um identificador simples do repositório e HEAD completo, sem URL ou
+credencial. Esses campos não são inferidos do resumo nem certificados pelo servidor.
 
 **Exemplo de parâmetros:**
 

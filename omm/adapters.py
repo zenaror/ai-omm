@@ -55,7 +55,12 @@ class GenericMarkdownAdapter:
                 output += block[:remaining - len(marker)].rstrip() + marker
             return False
 
-        state_lines = ["\n## Estado\n", str(state.get("summary") or "(Sem resumo registrado.)") + "\n",
+        recorded = state.get("updated_at") or "sem checkpoint"
+        revision = state.get("git_revision") or "não informada"
+        state_lines = ["\n## Estado\n",
+                       f"Origem: arquivos canônicos OMM | Registrado: {recorded} | Revisão: {revision}\n",
+                       "Atualidade do checkout: não conferida. Data e status não comprovam conclusão.\n",
+                       str(state.get("summary") or "(Sem resumo registrado.)") + "\n",
                        f"Status: {state.get('status', 'desconhecido')}\n"]
         for label, key in (("Impedimentos", "blockers"), ("Perguntas em aberto", "open_questions"),
                            ("Próximas ações", "next_actions")):
@@ -69,6 +74,7 @@ class GenericMarkdownAdapter:
         for item in records:
             evidence = "; ".join(item.evidence[:3]) if item.evidence else "nenhuma vinculada"
             block = (f"\n### [{item.kind}] {item.title}\n"
+                     f"Registro: {item.id} | Estado: {item.status} | Criado: {item.created_at}\n"
                      f"Origem: {item.source} | Confiança: {item.confidence or 'não informada'}\n"
                      f"Evidências: {evidence}\n{item.content}\n")
             if not append(block):
