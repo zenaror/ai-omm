@@ -13,6 +13,8 @@ from time import monotonic
 import uuid
 
 from .adapters import GenericMarkdownAdapter
+from .continuity import checkpoint_metadata, validate_repository, validate_revision
+from .errors import OMMError
 from .models import MemoryRecord
 from .retrieval import Retriever, SQLiteFTSRetriever
 from .redaction import find_credentials
@@ -159,7 +161,7 @@ class OMM:
         with self.operation_lock():
             self._ensure_index_current(force=True)
             if record.workstream_id and not any(item["id"] == record.workstream_id for item in self.store.workstreams()):
-                raise ValueError(f"unknown workstream: {record.workstream_id}; create it first")
+                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte status e peça o cadastro da frente antes de usá-la; não invente um ID.")
             self.store.append(record)
             self.retriever.add(record)
             self.retriever.set_indexed_fingerprint(self._canonical_fingerprint())
@@ -326,7 +328,7 @@ class OMM:
         if limit == 0:
             return []
         if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
-            raise ValueError(f"unknown workstream: {workstream_id}; create it first")
+            raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte status e peça o cadastro da frente antes de usá-la; não invente um ID.")
         self._ensure_index_current()
         canonical = self._records_by_id()
         search_limit = limit if workstream_id is None else max(limit * 10, 100)
@@ -619,32 +621,46 @@ class OMM:
         with self.operation_lock():
             return self.store.workstreams()
 
-    def get_handoff(self, scope: str = "default", workstream_id: str | None = None) -> dict:
+    def get_handoff(self, scope: str = "default", workstream_id: str | None = None,
+                    observed_revision: str | None = None, observed_repository: str | None = None) -> dict:
         """Expose the complete current state and a stable digest for guarded updates."""
         with self.operation_lock():
             if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
-                raise ValueError(f"unknown workstream: {workstream_id}; create it first")
+                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte status e peça o cadastro da frente antes de usá-la; não invente um ID.")
             state = self.store.read_state(workstream_id, scope)
             encoded = json.dumps({"scope": scope, "workstream_id": workstream_id, "state": state},
                                  ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            return {"scope": scope, "workstream_id": workstream_id, "state": state,
-                    "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest()}
+            result = {"scope": scope, "workstream_id": workstream_id, "state": state,
+                      "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest()}
+            result.update(checkpoint_metadata(state, observed_revision, observed_repository))
+            if state.get("workstream_id") != workstream_id and state.get("updated_at"):
+                result["selection_warning"] = "O estado selecionado pertence a outra frente; confira a seleção antes de gravar."
+            return result
 
-    def handoff(self, status: str, summary: str, blockers: list[str], questions: list[str], next_actions: list[str], actor: str, session_id: str | None = None, workstream_id: str | None = None, scope: str = "default", expected_sha256: str | None = None) -> None:
+    def handoff(self, status: str, summary: str, blockers: list[str], questions: list[str], next_actions: list[str], actor: str, session_id: str | None = None, workstream_id: str | None = None, scope: str = "default", expected_sha256: str | None = None, repository: str | None = None, branch: str | None = None, git_revision: str | None = None) -> None:
+        validate_repository(repository)
+        validate_revision(git_revision)
+        if branch is not None and (not isinstance(branch, str) or len(branch) > 200
+                                   or any(ord(c) < 32 for c in branch) or find_credentials(branch)):
+            raise OMMError("INVALID_ARGUMENT", "O nome da branch é inválido.", "Informe apenas o nome da branch, sem comandos ou credenciais.")
         with self.operation_lock():
             if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
-                raise ValueError(f"unknown workstream: {workstream_id}; create it first")
+                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte status e peça o cadastro da frente antes de usá-la; não invente um ID.")
             if expected_sha256 is not None:
                 if not isinstance(expected_sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
-                    raise ValueError("Informe o sha256 atual devolvido por get_handoff.")
+                    raise OMMError("INVALID_ARGUMENT", "O SHA esperado é inválido.", "Use o sha256 completo retornado por get_handoff.")
                 if self.get_handoff(scope, workstream_id)["sha256"] != expected_sha256.lower():
-                    raise ValueError("O handoff mudou desde a leitura. Leia get_handoff e mescle o estado antes de tentar novamente.")
+                    raise OMMError("VERSION_CONFLICT", "O handoff mudou desde a leitura; nada foi gravado.",
+                                   "Leia get_handoff novamente, mescle o estado e use o novo SHA. Não retire a proteção.")
             state = {
                 "schema_version": 1, "status": status, "summary": summary,
                 "blockers": blockers, "open_questions": questions, "next_actions": next_actions, "scope": scope,
                 "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                 "updated_by": actor, "session_id": session_id, "workstream_id": workstream_id,
             }
+            if repository is not None or branch is not None or git_revision is not None:
+                state.update(repository=repository, branch=branch,
+                             git_revision=git_revision.lower() if git_revision else None)
             self.store.append_handoff(state)
             if workstream_id is None and scope in {"default", "global"}:
                 self.store.write_state(state)

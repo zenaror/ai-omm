@@ -18,11 +18,13 @@ from .topology import add_historical_source as add_topology_source, load_topolog
 from .source_documents import read_source_markdown
 from .skills import read_skill, render_resolved_skill, resolve_skill_chain, skill_catalog
 from .usage import UsageRecorder
+from .errors import OMMError, guard_tool
 
 
 def build_server(root: Path):
     try:
         from mcp.server.mcpserver import MCPServer
+        from mcp.server.mcpserver.exceptions import ToolError
     except ImportError as exc:  # pragma: no cover - exercised in the optional install
         raise RuntimeError("Servidor MCP opcional ausente. Instale com: pip install '.[mcp]'") from exc
 
@@ -59,12 +61,16 @@ def build_server(root: Path):
         ),
     )
 
+    def execution_errors(function):
+        return guard_tool(function, ToolError)
+
     def measured_tool():
         def register(function):
-            return server.tool()(usage.wrap(function))
+            return server.tool()(execution_errors(usage.wrap(function)))
         return register
 
     @server.tool()
+    @execution_errors
     def usage_report(days: int = 7, scope: str | None = None) -> dict:
         """Mostra contagens, caracteres e tempos MCP; não contém textos nem mede tokens cobrados."""
         return usage.report(days, scope)
@@ -143,6 +149,8 @@ def build_server(root: Path):
                   "evidence": record.evidence, "tags": record.tags, "scope": record.scope,
                   "confidence": record.confidence, "status": record.status,
                   "created_at": record.created_at, "created_by": record.created_by}
+        result.update(origin="canonical", currentness="not_current" if record.status in {"superseded", "retracted"} else "not_verified",
+                      content_sha256=hashlib.sha256(record.content.encode("utf-8")).hexdigest())
         if max_chars is not None or start_char:
             result.update({"start_char": start_char, "end_char": end,
                            "total_chars": total, "truncated": start_char > 0 or end < total,
@@ -269,17 +277,19 @@ def build_server(root: Path):
                 questions: list[str] | None = None, next_actions: list[str] | None = None,
                 actor: str = "agent", session_id: str | None = None,
                 workstream_id: str | None = None, scope: str = "global",
-                expected_sha256: str | None = None) -> str:
-        """Mescla a passagem de trabalho; use o SHA de get_handoff para impedir sobrescrita concorrente."""
+                expected_sha256: str | None = None, repository: str | None = None,
+                branch: str | None = None, git_revision: str | None = None) -> str:
+        """Grava o estado completo com SHA; repository/branch/git_revision são metadados opcionais do checkpoint."""
         omm.handoff(status, summary, blockers or [], questions or [], next_actions or [],
-                    actor, session_id, workstream_id, scope, expected_sha256)
+                    actor, session_id, workstream_id, scope, expected_sha256, repository, branch, git_revision)
         return ("Passagem de trabalho registrada com verificação de versão." if expected_sha256 is not None
                 else "Passagem de trabalho registrada sem verificação de versão. Use get_handoff e expected_sha256 nas próximas gravações.")
 
     @measured_tool()
-    def get_handoff(scope: str = "global", workstream_id: str | None = None) -> dict:
-        """Lê o estado completo e seu SHA; preserve os itens vigentes antes de gravar handoff."""
-        return omm.get_handoff(scope, workstream_id)
+    def get_handoff(scope: str = "global", workstream_id: str | None = None,
+                    observed_revision: str | None = None, observed_repository: str | None = None) -> dict:
+        """Lê estado/SHA e procedência; compara revisão completa informada, sem inferir atualidade pela idade."""
+        return omm.get_handoff(scope, workstream_id, observed_revision, observed_repository)
 
     @measured_tool()
     def rebuild_index() -> str:
@@ -415,7 +425,8 @@ def build_server(root: Path):
         profiles = topology.get("project_profiles", {})
         if scope:
             if scope not in profiles:
-                raise ValueError(f"Não há perfil de ajudantes para o escopo: {scope}")
+                raise OMMError("PROFILE_NOT_FOUND", "Não há perfil próprio de ajudantes para esse projeto.",
+                               "Consulte get_agent_topology sem escopo e as regras do projeto; não repita a mesma chamada.")
             return {"scope": scope, "profile": profiles[scope], "sha256": digest}
         return {"default_mode": topology.get("default_mode"),
                 "coordinator_role": topology.get("coordinator_role"),

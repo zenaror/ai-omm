@@ -17,6 +17,7 @@ from .restore import RestoreError, restore_from_git
 from .sync import SyncError, preview_sync, sync_with_backup_report
 from .backup_worker import BackupError
 from .scope_merge import ScopeMergeError
+from .errors import OMMError, error_report
 
 
 def parser() -> argparse.ArgumentParser:
@@ -86,6 +87,15 @@ def parser() -> argparse.ArgumentParser:
     handoff.add_argument("--session-id", help="identificador da conversa relacionada")
     handoff.add_argument("--workstream-id", help="frente de trabalho relacionada")
     handoff.add_argument("--scope", default="default", help="alcance da passagem de trabalho")
+    handoff.add_argument("--expected-sha256", help="sha256 completo obtido com handoff-show antes de mesclar")
+    handoff.add_argument("--repository", help="identificador do repositório, por exemplo equipe/projeto; sem URL")
+    handoff.add_argument("--branch", help="branch observada no checkout")
+    handoff.add_argument("--git-revision", help="HEAD completo observado no checkout")
+    handoff_show = sub.add_parser("handoff-show", help="ler checkpoint, procedência e SHA para uma atualização protegida")
+    handoff_show.add_argument("--scope", default="default")
+    handoff_show.add_argument("--workstream-id")
+    handoff_show.add_argument("--observed-repository", help="identificador do repositório local conferido")
+    handoff_show.add_argument("--observed-revision", help="HEAD completo local conferido para comparar")
     sub.add_parser("rebuild", help="recriar a busca a partir dos arquivos de memória")
     restore = sub.add_parser("restore", help="restaurar a memória a partir de um repositório Git")
     restore.add_argument("--from", dest="source", required=True, help="URL ou caminho do repositório de backup")
@@ -204,10 +214,21 @@ def main(argv: list[str] | None = None) -> int:
         state_scope = args.scope[-1] if args.scope else None
         sys.stdout.write(omm.context(args.query, args.limit, args.workstream_id, args.scope, state_scope,
                                      include_sources=args.include_sources, budget_chars=args.budget_chars))
-    elif args.command == "handoff":
-        omm.handoff(args.status, args.summary, args.blocker, args.question, args.next_actions, args.by,
-                    args.session_id, args.workstream_id, args.scope)
-        print("Passagem de trabalho registrada")
+    elif args.command in {"handoff", "handoff-show"}:
+        try:
+            if args.command == "handoff-show":
+                print(json.dumps(omm.get_handoff(args.scope, args.workstream_id,
+                                                args.observed_revision, args.observed_repository),
+                                 ensure_ascii=False, indent=2))
+            else:
+                omm.handoff(args.status, args.summary, args.blocker, args.question, args.next_actions, args.by,
+                            args.session_id, args.workstream_id, args.scope, args.expected_sha256,
+                            args.repository, args.branch, args.git_revision)
+                print("Passagem de trabalho registrada com SHA." if args.expected_sha256
+                      else "Passagem registrada sem verificação de versão; use handoff-show e --expected-sha256.")
+        except (OMMError, OSError, ValueError) as exc:
+            print(json.dumps(error_report(exc, args.command), ensure_ascii=False), file=sys.stderr)
+            return 2
     elif args.command == "rebuild":
         record_count = omm.rebuild()
         print(f"Busca recriada: {record_count} anotações canônicas e "
