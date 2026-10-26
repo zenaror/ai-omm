@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Iterable
 from datetime import datetime, timezone
 
 from .models import MemoryRecord
+from .errors import OMMError
+from .redaction import find_credentials
+
+
+WORKSTREAM_STATUSES = frozenset({"active", "paused", "completed", "archived"})
 
 
 class CanonicalStore:
@@ -147,25 +153,71 @@ class CanonicalStore:
             stream.write(json.dumps(handoff, ensure_ascii=False, sort_keys=True) + "\n")
 
     def create_workstream(self, workstream_id: str, title: str, created_by: str, status: str = "active") -> dict:
-        if not workstream_id.strip() or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in workstream_id):
-            raise ValueError("workstream id may contain only letters, numbers, hyphens, and underscores")
-        if status not in {"active", "completed", "archived"}:
-            raise ValueError("workstream status must be active, completed, or archived")
-        workstreams = list(self.workstreams())
-        if any(item["id"] == workstream_id for item in workstreams):
-            raise ValueError(f"workstream already exists: {workstream_id}")
+        if not isinstance(workstream_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", workstream_id):
+            raise OMMError("INVALID_ARGUMENT", "Identificador de frente inválido.", "Use até 120 letras, números, hífens ou sublinhados; inclua o nome do projeto.")
+        self._validate_workstream(title, created_by, status)
+        if any(item["id"] == workstream_id for item in self.workstreams()):
+            raise OMMError("ALREADY_EXISTS", "A frente já existe.", "Leia get_workstream antes de atualizar; não crie uma duplicata.")
         item = {"id": workstream_id, "title": title, "status": status,
                 "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                 "created_by": created_by}
+        self._append_workstream(item)
+        return self.workstream_version(item)
+
+    @staticmethod
+    def _validate_workstream(title: str, actor: str, status: str) -> None:
+        if status not in WORKSTREAM_STATUSES:
+            raise OMMError("INVALID_ARGUMENT", "Estado de frente inválido.", "Use active, paused, completed ou archived.")
+        for value, limit in ((title, 300), (actor, 200)):
+            if (not isinstance(value, str) or not value.strip() or len(value) > limit
+                    or any(ord(c) < 32 for c in value) or find_credentials(value)):
+                raise OMMError("INVALID_ARGUMENT", "Nome ou autor da frente inválido.", "Use um nome curto e um identificador de agente, sem credenciais ou quebras de linha.")
+
+    @staticmethod
+    def workstream_version(item: dict) -> dict:
+        encoded = json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return {**item, "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest()}
+
+    def _append_workstream(self, item: dict) -> None:
         self.initialize()
         with self.workstreams_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n")
-        return item
+
+    def get_workstream(self, workstream_id: str) -> dict:
+        for item in self.workstreams():
+            if item["id"] == workstream_id:
+                return self.workstream_version(item)
+        raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
+
+    def update_workstream(self, workstream_id: str, expected_sha256: str, actor: str,
+                          title: str | None = None, status: str | None = None) -> dict:
+        if not isinstance(expected_sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
+            raise OMMError("INVALID_ARGUMENT", "SHA esperado inválido.", "Use o sha256 completo retornado por get_workstream.")
+        current = self.get_workstream(workstream_id)
+        if current.pop("sha256") != expected_sha256.lower():
+            raise OMMError("VERSION_CONFLICT", "A frente mudou desde a leitura; nada foi gravado.", "Leia get_workstream novamente e mescle a alteração; não retire a proteção.")
+        if title is None and status is None:
+            raise OMMError("INVALID_ARGUMENT", "Nenhuma alteração informada.", "Informe title ou status.")
+        updated = {**current, "title": current["title"] if title is None else title,
+                   "status": current["status"] if status is None else status}
+        self._validate_workstream(updated["title"], actor, updated["status"])
+        if updated != current:
+            updated.update(updated_by=actor, updated_at=datetime.now(timezone.utc).isoformat())
+            self._append_workstream(updated)
+        return self.workstream_version(updated)
 
     def workstreams(self) -> list[dict]:
         if not self.workstreams_path.exists():
             return []
-        return [json.loads(line) for line in self.workstreams_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        # Legacy files have one snapshot per ID. New revisions append snapshots;
+        # readers see only the latest, while the original remains recoverable.
+        latest = {}
+        with self.workstreams_path.open(encoding="utf-8") as stream:
+            for line in stream:
+                if line.strip():
+                    item = json.loads(line)
+                    latest[item["id"]] = item
+        return list(latest.values())
 
     def proposals(self, pending_only: bool = False) -> list[dict]:
         if not self.proposals_path.exists():

@@ -12,6 +12,14 @@ import re
 import sqlite3
 from time import perf_counter
 
+from .errors import error_report
+
+
+# Never store arbitrary exception codes, messages, arguments or class names.
+ERROR_CODES = frozenset({"VERSION_CONFLICT", "UNKNOWN_WORKSTREAM", "PROFILE_NOT_FOUND",
+                         "NOT_FOUND", "PERMISSION_DENIED", "ALREADY_EXISTS", "INVALID_ARGUMENT",
+                         "TIMEOUT", "STORAGE_UNAVAILABLE", "INTERNAL_ERROR"})
+
 
 class UsageRecorder:
     def __init__(self, root: Path):
@@ -32,6 +40,10 @@ class UsageRecorder:
             input_chars INTEGER NOT NULL, output_chars INTEGER NOT NULL,
             total_ms REAL NOT NULL, max_ms REAL NOT NULL,
             PRIMARY KEY(day, tool, scope))""")
+        db.execute("""CREATE TABLE IF NOT EXISTS usage_errors_daily (
+            day TEXT NOT NULL, tool TEXT NOT NULL, scope TEXT NOT NULL,
+            error_code TEXT NOT NULL, failures INTEGER NOT NULL,
+            PRIMARY KEY(day, tool, scope, error_code))""")
         return db
 
     @staticmethod
@@ -54,11 +66,12 @@ class UsageRecorder:
         return value
 
     def _record(self, tool: str, scope: str, inputs: int, outputs: int,
-                elapsed_ms: float, failed: bool):
+                elapsed_ms: float, failed: bool, error_code: str | None = None):
         now = datetime.now(timezone.utc)
         cutoff = (now - timedelta(days=self.retention_days - 1)).date().isoformat()
         with closing(self._connect()) as db, db:
             db.execute("DELETE FROM usage_daily WHERE day < ?", (cutoff,))
+            db.execute("DELETE FROM usage_errors_daily WHERE day < ?", (cutoff,))
             known = db.execute("SELECT 1 FROM usage_daily WHERE scope=? LIMIT 1", (scope,)).fetchone()
             if not known and db.execute("SELECT COUNT(DISTINCT scope) FROM usage_daily").fetchone()[0] >= 128:
                 scope = "_other"
@@ -69,6 +82,11 @@ class UsageRecorder:
                 output_chars=output_chars+excluded.output_chars,
                 total_ms=total_ms+excluded.total_ms, max_ms=MAX(max_ms,excluded.max_ms)""",
                 (now.date().isoformat(), tool, scope, 1, int(failed), inputs, outputs, elapsed_ms, elapsed_ms))
+            if failed and error_code is not None:
+                code = error_code if error_code in ERROR_CODES else "INTERNAL_ERROR"
+                db.execute("""INSERT INTO usage_errors_daily VALUES(?,?,?,?,1)
+                    ON CONFLICT(day,tool,scope,error_code) DO UPDATE SET failures=failures+1""",
+                    (now.date().isoformat(), tool, scope, code))
 
     def wrap(self, function):
         signature = inspect.signature(function)
@@ -88,6 +106,7 @@ class UsageRecorder:
             scope = self._scope(scope_args)
             output_chars = 0
             failed = True
+            error_code = None
             try:
                 result = function(*args, **kwargs)
                 # Memory reads use an ID rather than an input scope. Their
@@ -97,10 +116,13 @@ class UsageRecorder:
                 output_chars = self._size(result)
                 failed = False
                 return result
+            except Exception as error:
+                error_code = error_report(error, function.__name__)["error"]["code"]
+                raise
             finally:
                 elapsed_ms = (perf_counter() - started) * 1000
                 try:
-                    self._record(function.__name__, scope, input_chars, output_chars, elapsed_ms, failed)
+                    self._record(function.__name__, scope, input_chars, output_chars, elapsed_ms, failed, error_code)
                 except (OSError, sqlite3.Error):
                     # Optional telemetry must never turn a successful write into an error.
                     self.write_failures += 1
@@ -120,7 +142,8 @@ class UsageRecorder:
         result = {"enabled": self.enabled, "days": days, "retention_days": self.retention_days,
                   "timezone": "UTC", "transport": "MCP", "write_failures_since_start": self.write_failures,
                   "measurement": "Caracteres JSON e tempo interno; não mede tokens cobrados, cache, rede ou descrições das ferramentas.",
-                  "rows": []}
+                  "rows": [], "error_rows": [],
+                  "error_measurement": "Categorias de falhas desde esta versão; falhas antigas não têm categoria. Sem mensagens de erro ou conteúdo das chamadas."}
         if not self.enabled or not self.path.exists():
             return result
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date().isoformat()
@@ -144,4 +167,14 @@ class UsageRecorder:
                 result["rows"].append({"tool": tool, "scope": project,
                     "calls": calls, "failures": failures, "input_chars": inputs, "output_chars": outputs,
                     "mean_ms": round(total_ms / calls, 2), "max_ms": round(max_ms, 2)})
+            error_sql = "SELECT tool,scope,error_code,SUM(failures) FROM usage_errors_daily WHERE day>=?"
+            if scope is not None:
+                error_sql += " AND scope=?"
+            errors = list(db.execute(error_sql + " GROUP BY tool,scope,error_code ORDER BY SUM(failures) DESC,scope,tool,error_code", params))
+            result["error_group_count"] = len(errors)
+            result["errors_truncated"] = len(errors) > 50
+            result["classified_failures"] = sum(row[3] for row in errors)
+            result["unclassified_failures"] = max(0, result["totals"]["failures"] - result["classified_failures"])
+            result["error_rows"] = [{"tool": tool, "scope": project, "code": code, "failures": count}
+                                    for tool, project, code, count in errors[:50]]
         return result

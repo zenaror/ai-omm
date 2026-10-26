@@ -7,8 +7,8 @@ testes sejam suficientes ou que o backup remoto já tenha recebido os dados.
 ## Quando a OMM está disponível
 
 1. Leia o `AGENTS.md` e identifique o projeto e a frente, se houver. Não invente
-   uma frente: ela precisa existir na OMM. `status` mostra as cadastradas;
-   o cadastro administrativo continua pela CLI `workstream create`.
+   uma frente: ela precisa existir na OMM. `list_workstreams` mostra as cadastradas
+   em páginas pequenas. Para uma tarefa única, use o handoff central sem frente.
 2. Consulte `context` seletivamente e abra o handoff completo quando necessário.
    Confira no checkout real branch, HEAD, alterações locais e fontes canônicas.
 3. Antes de gravar, leia `get_handoff` no mesmo escopo e frente. Preserve o que
@@ -19,6 +19,31 @@ testes sejam suficientes ou que o backup remoto já tenha recebido os dados.
 **Existem dois hashes diferentes:** o SHA do handoff protege uma atualização
 da memória; o HEAD do Git identifica um commit do projeto. Não compare um ao
 outro nem use o HEAD como `expected_sha256`.
+
+### Organizar frentes sem sair do MCP
+
+Uma frente separa um trabalho paralelo, como `meu-projeto-audio`.
+Os IDs são únicos em toda a OMM, por isso inclua o nome do projeto.
+Não crie uma frente só porque outra ferramenta pediu um ID.
+
+1. Procure com `list_workstreams`. Use `next_offset` para ler a página seguinte.
+2. Se precisar de uma frente nova e a tarefa autorizar, use `create_workstream`.
+3. Leia `get_workstream` antes de mudar o nome ou o estado.
+4. Use `update_workstream` com o SHA retornado. Em conflito, releia e mescle.
+
+Os estados são `active` (em andamento), `paused` (pausada), `completed`
+(concluída) e `archived` (arquivada). Registre evidências e próximos passos no
+handoff antes de encerrar uma frente. Mudar o estado não comprova conclusão.
+As revisões anteriores são preservadas, e os handoffs não são alterados por
+essas ferramentas. O ID de uma frente não muda.
+
+Frentes e handoffs não alteram metas nativas do Codex ou de outro aplicativo.
+Se uma meta nativa não permitir mudar o objetivo, preserve seu estado verdadeiro
+e registre o objetivo operacional no handoff. Não simule conclusão.
+
+Na CLI, use `workstream show --id meu-projeto-audio` para obter o SHA e
+`workstream update --id meu-projeto-audio --status paused --expected-sha256 SHA_ATUAL`.
+Substitua `SHA_ATUAL` pelo hash completo recebido na leitura.
 
 ### Comparar revisões explicitamente
 
@@ -97,8 +122,8 @@ ao texto. Resultados bem-sucedidos permanecem compatíveis.
 | Código | Como proceder |
 | --- | --- |
 | `VERSION_CONFLICT` | Releia e mescle usando o SHA atual. A chamada recusada não gravou. |
-| `UNKNOWN_WORKSTREAM` | Consulte `status` e peça o cadastro; não invente outra frente. |
-| `PROFILE_NOT_FOUND` | Consulte a topologia global e as instruções do projeto. |
+| `UNKNOWN_WORKSTREAM` | Consulte `list_workstreams`; crie uma frente somente quando necessária e autorizada. |
+| `PROFILE_NOT_FOUND` (servidores antigos) | Consulte a topologia global e as instruções do projeto. Versões atuais retornam esse padrão na própria consulta, com `fallback=true`. |
 | `NOT_FOUND` | Confira o identificador e a origem do recurso. |
 | `INVALID_ARGUMENT` | Confira campos, limites e tipos antes de corrigir a chamada. |
 | `ALREADY_EXISTS` | Leia o recurso existente antes de escolher uma atualização. |

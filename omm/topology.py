@@ -19,6 +19,28 @@ def topology_sha256(root: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def select_topology(root: Path, scope: str | None = None) -> dict:
+    """Read a project profile, or explicitly use the global routing rules.
+
+    The caller holds the operation lock. Invalid topology is never a fallback.
+    """
+    topology = load_topology(root)
+    digest = topology_sha256(root)
+    profiles = topology.get("project_profiles", {})
+    if scope and scope in profiles:
+        return {"scope": scope, "profile": profiles[scope], "sha256": digest,
+                "profile_found": True, "fallback": False}
+    result = {"default_mode": topology.get("default_mode"),
+              "coordinator_role": topology.get("coordinator_role"),
+              "shared_memory": topology.get("shared_memory"),
+              "general_subagents": topology.get("subagents", []),
+              "project_scopes": sorted(profiles), "sha256": digest}
+    if scope:
+        result.update(scope=scope, profile_found=False, fallback=True,
+                      message="Este projeto não tem perfil próprio. Use estas regras globais junto das regras do projeto; não é preciso repetir a consulta sem escopo.")
+    return result
+
+
 def add_historical_source(root: Path, scope: str, name: str, platform: str,
                           session_id: str, source_path: str, purpose: str,
                           expected_sha256: str) -> dict[str, object]:

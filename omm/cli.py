@@ -68,7 +68,8 @@ def parser() -> argparse.ArgumentParser:
     semantic.add_argument("--mode", choices=["all", "memory", "sources"], default="all")
     semantic.add_argument("--limit", type=int, default=5)
     semantic.add_argument("--scope", action="append", help="limitar aos projetos informados")
-    sub.add_parser("semantic-rebuild", help="recriar o índice semântico local")
+    semantic_rebuild = sub.add_parser("semantic-rebuild", help="recriar o índice semântico local")
+    semantic_rebuild.add_argument("--scope", action="append", help="recriar só este projeto; pode repetir. Sem esta opção, recria tudo")
     sub.add_parser("semantic-compact", help="reduzir o espaço do índice semântico local sem recalcular vetores")
     context = sub.add_parser("context", help="preparar um resumo para passar a um assistente")
     context.add_argument("query")
@@ -110,8 +111,16 @@ def parser() -> argparse.ArgumentParser:
     workstream_create.add_argument("--id", required=True, help="identificador curto, sem espaços")
     workstream_create.add_argument("--title", required=True, help="nome da frente de trabalho")
     workstream_create.add_argument("--by", default="human", help="quem registrou a frente")
-    workstream_create.add_argument("--status", choices=["active", "completed", "archived"], default="active", help="estado da frente")
+    workstream_create.add_argument("--status", choices=["active", "paused", "completed", "archived"], default="active", help="estado da frente")
     workstream_sub.add_parser("list", help="mostrar as frentes de trabalho")
+    workstream_show = workstream_sub.add_parser("show", help="ler uma frente e seu SHA atual")
+    workstream_show.add_argument("--id", required=True)
+    workstream_update = workstream_sub.add_parser("update", help="atualizar uma frente sem sobrescrever uma versão nova")
+    workstream_update.add_argument("--id", required=True)
+    workstream_update.add_argument("--expected-sha256", required=True)
+    workstream_update.add_argument("--title")
+    workstream_update.add_argument("--status", choices=["active", "paused", "completed", "archived"])
+    workstream_update.add_argument("--by", default="human")
     history = sub.add_parser("history", help="revisar anotações extraídas de conversas antigas")
     history_sub = history.add_subparsers(dest="history_command", required=True)
     history_stage = history_sub.add_parser("stage", help="preparar anotações para revisão; elas ainda não entram na memória")
@@ -202,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(omm.semantic_search(args.query, args.mode, args.limit, args.scope),
                          ensure_ascii=False, indent=2))
     elif args.command == "semantic-rebuild":
-        print(f"Índice semântico recriado: {omm.rebuild_semantic()} itens")
+        print(f"Índice semântico recriado: {omm.rebuild_semantic(args.scope)} itens")
     elif args.command == "semantic-compact":
         try:
             result = omm.compact_semantic_index()
@@ -299,11 +308,21 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(report["message"])
     elif args.command == "workstream":
-        if args.workstream_command == "create":
-            print(json.dumps(omm.create_workstream(args.id, args.title, args.by, args.status), ensure_ascii=False))
-        else:
-            for item in omm.workstreams():
-                print(json.dumps(item, ensure_ascii=False))
+        try:
+            if args.workstream_command == "create":
+                result = omm.create_workstream(args.id, args.title, args.by, args.status)
+            elif args.workstream_command == "show":
+                result = omm.get_workstream(args.id)
+            elif args.workstream_command == "update":
+                result = omm.update_workstream(args.id, args.expected_sha256, args.by, args.title, args.status)
+            else:
+                for item in omm.workstreams():
+                    print(json.dumps(item, ensure_ascii=False))
+                return 0
+            print(json.dumps(result, ensure_ascii=False))
+        except (OMMError, OSError, ValueError) as exc:
+            print(json.dumps(error_report(exc, "workstream-" + args.workstream_command), ensure_ascii=False), file=sys.stderr)
+            return 2
     elif args.command == "history":
         if args.history_command == "stage":
             staged = stage_history(omm.root, args.file.read_bytes())

@@ -102,6 +102,20 @@ Na primeira busca de cada escopo (global ou projeto), a OMM prepara os vetores d
 
 Quando habilitada, o agente pode chamar `semantic_search` se a busca comum não encontrar algo que parece estar na memória. Na linha de comando, use `omm semantic-search "sua pergunta"`; para refazer manualmente o índice, use `omm semantic-rebuild`. Esses comandos da CLI esperam a reconstrução terminar.
 
+Para atualizar só um projeto, use `omm --root /data semantic-rebuild --scope meu-projeto`.
+Repita `--scope` para escolher outros projetos no mesmo comando. Sem `--scope`,
+o comando continua reconstruindo tudo. Os vetores dos outros projetos são
+preservados, e textos inalterados reaproveitam os vetores existentes.
+
+No terminal do servidor com Docker, primeiro veja o nome com `docker ps` e use:
+
+```bash
+docker exec -i NOME_DO_CONTAINER python -m omm --root /data semantic-rebuild --scope meu-projeto
+```
+
+Troque o nome do container e do projeto. Isso é manutenção opcional: não grava
+memórias, não sincroniza o backup e não significa que o índice global ficou atualizado.
+
 Para reduzir o espaço ocupado pelo índice semântico que já existe, no terminal do LXC, dentro da pasta da stack, rode `docker compose exec -T omm python -m omm --root /data semantic-compact`. Ele não chama o Ollama nem altera as memórias ou fontes; só troca o formato dos vetores e remove cópias de texto que já estão na busca lexical. A compactação termina com uma reorganização do arquivo SQLite e pode usar espaço temporário durante essa etapa. Faça isso quando o serviço estiver saudável.
 
 ### Criar ou atualizar skills e papéis

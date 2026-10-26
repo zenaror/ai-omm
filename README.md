@@ -59,6 +59,12 @@ Por padrão, a OMM usa busca textual local. A busca semântica é opcional: em v
 
 Para economizar contexto, agentes podem corrigir trechos com `patch_source`, sem reenviar documentos inteiros. `get_handoff` e o hash esperado em `handoff` protegem a passagem de trabalho contra outra sessão. `usage_report` mostra contagens e tamanhos das chamadas MCP sem guardar seu texto; não mede tokens faturados. Veja [ferramentas e exemplos](docs/FERRAMENTAS_MCP.md) e [as orientações de uso](docs/USAR_OMM_NOS_AGENTES.md#economia-de-contexto-sem-perder-continuidade).
 
+Projetos sem mapa próprio de agentes recebem as regras globais na mesma consulta.
+Frentes paralelas podem ser consultadas e atualizadas pelo MCP, com proteção por
+SHA. O relatório de uso separa as categorias de falha, e a CLI permite reconstruir
+a busca semântica só dos projetos escolhidos. Depois de atualizar o servidor,
+reconecte o MCP para ver as ferramentas novas.
+
 Para conferir se a busca encontra exemplos esperados, rode `python3 benchmarks/retrieval_eval.py`. O conjunto usa dados inventados e inclui documentos parecidos para a posição dos resultados importar. Com `--json`, a saída pode ser lida por uma automação; `--min-hit-rate-at-3` e `--min-mrr-at-5` definem limites entre `0` e `1` e fazem o comando terminar com erro se a busca cair abaixo deles (`0.8` significa 80%). O exemplo só mede busca por palavras, sem Ollama.
 
 Para medir tempos com uma coleção inventada, rode `python3 benchmarks/performance_eval.py`. O relatório mostra a criação do índice, busca, montagem de contexto e painel. Os dados são apagados ao terminar; por padrão, a busca medida é a textual e não inclui o Ollama.

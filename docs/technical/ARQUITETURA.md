@@ -11,6 +11,23 @@ MCP, com código, recuperação e resultado de escrita conhecido ou incerto.
 Argumentos e texto bruto de exceções não são enviados nem registrados nesse
 diagnóstico; o log contém apenas operação, código e classe da exceção.
 `UsageRecorder` permanece dentro dessa fronteira e continua contando falhas.
+As categorias permitidas ficam em `usage_errors_daily`, no mesmo SQLite
+descartável. A retenção e o limite de escopos acompanham `usage_daily`.
+Contadores antigos são preservados e aparecem como falhas sem categoria.
+Código desconhecido vira `INTERNAL_ERROR`; mensagens de exceção não são armazenadas.
+
+Sem perfil específico, `get_agent_topology` devolve as regras globais com
+`profile_found=false` e `fallback=true`. Não cria perfil; escritas na topologia
+continuam exigindo um perfil real e SHA atual. Configuração inválida não é fallback.
+
+Frentes continuam em `memory/workstreams.jsonl`. Atualizações acrescentam
+fotografias completas do mesmo ID; a leitura escolhe a última. Arquivos antigos
+com uma linha por ID continuam válidos. `update_workstream` compara o SHA do
+estado completo dentro do bloqueio de dados e recusa versões obsoletas. Não
+altera o ID, memórias ou handoffs. Evite misturar versões antigas do servidor
+com a nova no mesmo diretório: leitores antigos não consolidam essas revisões.
+As ferramentas seguem a autenticação existente; aprovação no cliente não é
+controle de permissão por projeto no servidor.
 
 `get_handoff` conserva o SHA calculado somente sobre seleção e estado e
 acrescenta procedência e atualidade. A comparação de revisão é opcional e usa

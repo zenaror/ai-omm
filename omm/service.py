@@ -161,7 +161,7 @@ class OMM:
         with self.operation_lock():
             self._ensure_index_current(force=True)
             if record.workstream_id and not any(item["id"] == record.workstream_id for item in self.store.workstreams()):
-                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte status e peça o cadastro da frente antes de usá-la; não invente um ID.")
+                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
             self.store.append(record)
             self.retriever.add(record)
             self.retriever.set_indexed_fingerprint(self._canonical_fingerprint())
@@ -328,7 +328,7 @@ class OMM:
         if limit == 0:
             return []
         if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
-            raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte status e peça o cadastro da frente antes de usá-la; não invente um ID.")
+            raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
         self._ensure_index_current()
         canonical = self._records_by_id()
         search_limit = limit if workstream_id is None else max(limit * 10, 100)
@@ -460,14 +460,16 @@ class OMM:
         with self.operation_lock():
             return save_role_file(self.root, name, content, expected_sha256)
 
-    def rebuild_semantic(self) -> int:
+    def rebuild_semantic(self, scopes: list[str] | None = None) -> int:
         """Create the optional vector index from canonical records and source files."""
         if self.semantic is None:
             raise SemanticSearchError("Busca semântica desligada. Configure OMM_SEMANTIC_ENABLED=true e os dados do serviço de embeddings.")
         with self.operation_lock():
             self._ensure_index_current()
             fingerprint = self._canonical_fingerprint()
-            return self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root), fingerprint)
+            if scopes is not None and (not scopes or any(not isinstance(scope, str) or not scope.strip() for scope in scopes)):
+                raise ValueError("Informe ao menos um escopo não vazio, ou omita --scope para reconstruir tudo.")
+            return self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root), fingerprint, scopes=scopes)
 
     def _semantic_stale_scopes(self, fingerprint: str, scopes: list[str] | None) -> list[str] | None:
         assert self.semantic is not None
@@ -621,12 +623,35 @@ class OMM:
         with self.operation_lock():
             return self.store.workstreams()
 
+    def list_workstreams(self, status: str | None = None, offset: int = 0, limit: int = 20) -> dict:
+        from .store import WORKSTREAM_STATUSES
+        if status is not None and status not in WORKSTREAM_STATUSES:
+            raise ValueError("Use active, paused, completed ou archived.")
+        if (isinstance(offset, bool) or not isinstance(offset, int) or offset < 0
+                or isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100):
+            raise ValueError("Use offset a partir de zero e limit entre 1 e 100.")
+        with self.operation_lock():
+            items = sorted((item for item in self.store.workstreams()
+                            if status is None or item["status"] == status), key=lambda item: item["id"])
+            selected = items[offset:offset + limit]
+            return {"items": [self.store.workstream_version(item) for item in selected],
+                    "total": len(items), "next_offset": offset + limit if offset + limit < len(items) else None}
+
+    def get_workstream(self, workstream_id: str) -> dict:
+        with self.operation_lock():
+            return self.store.get_workstream(workstream_id)
+
+    def update_workstream(self, workstream_id: str, expected_sha256: str, actor: str = "human",
+                          title: str | None = None, status: str | None = None) -> dict:
+        with self.operation_lock():
+            return self.store.update_workstream(workstream_id, expected_sha256, actor, title, status)
+
     def get_handoff(self, scope: str = "default", workstream_id: str | None = None,
                     observed_revision: str | None = None, observed_repository: str | None = None) -> dict:
         """Expose the complete current state and a stable digest for guarded updates."""
         with self.operation_lock():
             if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
-                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte status e peça o cadastro da frente antes de usá-la; não invente um ID.")
+                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
             state = self.store.read_state(workstream_id, scope)
             encoded = json.dumps({"scope": scope, "workstream_id": workstream_id, "state": state},
                                  ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -645,7 +670,7 @@ class OMM:
             raise OMMError("INVALID_ARGUMENT", "O nome da branch é inválido.", "Informe apenas o nome da branch, sem comandos ou credenciais.")
         with self.operation_lock():
             if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
-                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte status e peça o cadastro da frente antes de usá-la; não invente um ID.")
+                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
             if expected_sha256 is not None:
                 if not isinstance(expected_sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
                     raise OMMError("INVALID_ARGUMENT", "O SHA esperado é inválido.", "Use o sha256 completo retornado por get_handoff.")

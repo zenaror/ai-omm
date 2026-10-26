@@ -19,10 +19,11 @@ Você pode pedir em português: “Procure na OMM onde paramos no meu projeto”
 | Saber como trabalhar | `list_skills` → `get_skill` |
 | Saber quem faz o quê | `get_agent_topology`, `list_roles` → `get_role` |
 | Deixar o próximo passo | `handoff` |
+| Organizar frentes paralelas | `list_workstreams` → `get_workstream` |
 | Conferir uso e tamanho das chamadas | `usage_report` |
 | Investigar problema na instalação | `diagnose_setup` |
 
-As seções seguintes cobrem as **31 ferramentas MCP** da aplicação. As ferramentas disponíveis numa conexão podem variar com a versão instalada; depois de atualizar, reconecte o MCP.
+As seções seguintes explicam as ferramentas MCP da aplicação. As ferramentas disponíveis numa conexão podem variar com a versão instalada; depois de atualizar, reconecte o MCP.
 
 ## Medir o uso
 
@@ -35,6 +36,13 @@ Mostra quanto texto passa pelas ferramentas MCP e quantas chamadas foram feitas.
 ```
 
 O escopo é opcional. O relatório soma o período em UTC e mostra os 50 maiores grupos por ferramenta/projeto, incluindo falhas e tempos. Os totais incluem os grupos que ficaram fora da lista; `truncated=true` avisa o corte. Consulte um projeto específico para reduzir a resposta. A consulta ao relatório não conta a si mesma.
+
+`error_rows` mostra até 50 grupos de falhas por ferramenta, projeto e categoria,
+como `VERSION_CONFLICT`. `errors_truncated` avisa se há mais grupos.
+`classified_failures` conta as falhas com categoria; `unclassified_failures`
+inclui as antigas, quando essa informação ainda não era coletada. Não deduza
+a causa das falhas antigas a partir das novas. Erros de autenticação ou de
+validação do protocolo, que não chegaram à execução da ferramenta, ficam fora.
 
 **Limites:** são caracteres JSON e tempos internos, não tokens cobrados ou economia provada. Não inclui chamadas ao painel ou à CLI, tempo de rede, cache, descrições das ferramentas ou custos externos dos subagentes. Não guarda perguntas, respostas, senhas, mensagens de erro ou hashes de consultas. Não distingue clientes nem mede repetições. Os nomes de escopo são guardados; não coloque dados pessoais neles. Retém 30 dias por padrão em `.omm/usage.sqlite3`, fora do backup Git. A coleta começa nesta versão, sem histórico retroativo. Veja as [opções de coleta](USAR_OMM_NOS_AGENTES.md#medição-contínua-das-chamadas).
 
@@ -444,7 +452,7 @@ Crie ou atualize as responsabilidades de um papel.
 
 Abra o mapa que diz quem coordena, quais ajudantes se aplicam e quais conversas são históricas.
 
-**O que acontece e o que conferir:** Consulta. Com scope, exige que o projeto tenha um perfil. Se não tiver, consulte sem scope para ler o padrão global. O mapa não inicia ajudantes: isso depende do aplicativo do assistente.
+**O que acontece e o que conferir:** Consulta. Com scope, retorna o perfil próprio quando existe (`profile_found=true`). Sem perfil próprio, já devolve o padrão global, com `profile_found=false` e `fallback=true`. Não cria perfil nem exige outra consulta. Um mapa inválido continua sendo erro. O mapa não inicia ajudantes: isso depende do aplicativo do assistente.
 
 **Exemplo de parâmetros:**
 
@@ -527,6 +535,8 @@ credencial. Esses campos não são inferidos do resumo nem certificados pelo ser
 
 ### `status`
 
+Para localizar uma frente sem carregar o estado geral, prefira `list_workstreams`.
+
 Veja as contagens da OMM e as frentes de trabalho registradas.
 
 **O que acontece e o que conferir:** Consulta. Ajuda a localizar estado e frentes, mas não prova que uma tarefa terminou nem que foi enviada ao backup remoto.
@@ -536,6 +546,44 @@ Veja as contagens da OMM e as frentes de trabalho registradas.
 ```json
 {}
 ```
+
+### `list_workstreams` e `get_workstream`
+
+Uma frente organiza trabalho paralelo. A lista usa páginas de 20 itens por padrão
+(até 100) e pode filtrar por estado. IDs são únicos em toda a OMM.
+
+```json
+{"status": "active", "offset": 0, "limit": 20}
+```
+
+Se vier `next_offset`, use esse número na consulta seguinte. Para abrir uma
+frente, chame `get_workstream` com `{"workstream_id":"meu-projeto-audio"}`.
+O resultado inclui o SHA atual. Uma tarefa única pode usar o handoff central
+sem cadastrar frente.
+
+### `create_workstream`
+
+Cadastre uma frente nova apenas quando a tarefa exigir e estiver autorizada.
+Confira a lista antes para evitar duplicatas. Use um ID com nome de projeto.
+
+```json
+{"workstream_id":"meu-projeto-audio","title":"Áudio","actor":"agente","status":"active"}
+```
+
+Isso não cria agentes, metas nativas ou handoffs, nem concede permissões.
+
+### `update_workstream`
+
+Mude o nome ou o estado usando o SHA de `get_workstream`.
+
+```json
+{"workstream_id":"meu-projeto-audio","status":"paused","actor":"agente","expected_sha256":"HASH_COMPLETO_DA_LEITURA"}
+```
+
+Substitua o hash pelo valor real. Os estados são `active`, `paused`, `completed`
+e `archived`. A ferramenta preserva as revisões anteriores e não muda handoffs.
+Em conflito, releia e mescle. Para concluir, registre antes no handoff as provas
+de que os critérios foram atendidos. O estado sozinho não prova conclusão.
 
 ### `merge_scope`
 
