@@ -13,6 +13,7 @@ Você pode pedir em português: “Procure na OMM onde paramos no meu projeto”
 | Retomar o trabalho | `context` |
 | Encontrar uma anotação | `search` → `get_memory` |
 | Conferir um documento | `search_sources` → `read_source` |
+| Conferir uma imagem | `list_image_evidence` → `read_image_evidence` |
 | Procurar pelo assunto | `semantic_search` → `semantic_index_status` se precisar |
 | Sugerir algo para guardar | `propose_memory` |
 | Guardar diretamente, com pedido da pessoa | `remember` |
@@ -47,6 +48,34 @@ validação do protocolo, que não chegaram à execução da ferramenta, ficam f
 **Limites:** são caracteres JSON e tempos internos, não tokens cobrados ou economia provada. Não inclui chamadas ao painel ou à CLI, tempo de rede, cache, descrições das ferramentas ou custos externos dos subagentes. Não guarda perguntas, respostas, senhas, mensagens de erro ou hashes de consultas. Não distingue clientes nem mede repetições. Os nomes de escopo são guardados; não coloque dados pessoais neles. Retém 30 dias por padrão em `.omm/usage.sqlite3`, fora do backup Git. A coleta começa nesta versão, sem histórico retroativo. Veja as [opções de coleta](USAR_OMM_NOS_AGENTES.md#medição-contínua-das-chamadas).
 
 ## Consultar o que já existe
+
+### Imagens: `list_image_evidence`, `read_image_evidence` e `delete_image_evidence`
+
+Liste primeiro as descrições, sem carregar imagens:
+
+```json
+{"scope": "meu-projeto", "offset": 0, "limit": 10}
+```
+
+`list_image_evidence` retorna até 20 itens por chamada, com `next_offset` quando
+há mais. Use o `path` devolvido em `read_image_evidence`:
+
+```json
+{"path": "sources/meu-projeto/evidence/HASH.image-evidence.md", "variant": "preview"}
+```
+
+O caminho acima é ilustrativo: copie o caminho real, não invente o hash.
+A leitura retorna descrição e um bloco de imagem para clientes com visão.
+`preview` limita a imagem a 512 pixels por lado; `original` preserva o arquivo completo.
+O custo visual depende do modelo e não é medido por `usage_report`.
+
+`delete_image_evidence` recebe `path` e `expected_sha256`, ambos da listagem atual.
+O hash é da descrição, não dos pixels. Só remova quando autorizado: a descrição
+some dos arquivos atuais e o original só sai se nenhuma outra descrição na pasta
+o usar. O histórico Git pode continuar guardando ambos.
+
+Não há upload de imagem em texto pelo MCP. Para enviar pelo painel, pela CLI ou
+por HTTP com os bytes do arquivo, siga [Guardar imagens como evidência](IMAGENS.md).
 
 ### `context`
 

@@ -56,6 +56,17 @@ def parser() -> argparse.ArgumentParser:
     source_delete = sub.add_parser("source-delete", help="remover um documento-fonte dos arquivos atuais")
     source_delete.add_argument("path", help="caminho completo, por exemplo sources/projeto/notas.md")
     source_delete.add_argument("--expected-sha256", required=True, help="sha256 atual da fonte, obtido antes da remoção")
+    for command, help_text in (("image-import", "guardar uma imagem com descrição"),
+                               ("image-import-batch", "guardar um lote de imagens descrito por manifesto JSON")):
+        image_parser = sub.add_parser(command, help=help_text)
+        image_parser.add_argument("--scope", required=True, help="projeto dono das evidências")
+        image_parser.add_argument("--server-url", help="URL do painel remoto; sem ela, grava nos dados locais de --root")
+        image_parser.add_argument("--token-env", default="OMM_MCP_TOKEN", help="variável de ambiente com token MCP; nunca informe o token no manifesto")
+        if command == "image-import":
+            image_parser.add_argument("--file", type=Path, required=True)
+            image_parser.add_argument("--metadata", type=Path, required=True, help="JSON com title, description, origin e campos opcionais")
+        else:
+            image_parser.add_argument("--manifest", type=Path, required=True, help="JSON com lista de até 50 itens file/metadata; caminhos relativos ao manifesto")
     merge_scope = sub.add_parser("merge-scope", help="unir os dados de um escopo de projeto em outro")
     merge_scope.add_argument("source_scope", help="escopo que será incorporado")
     merge_scope.add_argument("target_scope", help="escopo que continuará como nome canônico")
@@ -177,6 +188,44 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"id": hit.id, "scope": hit.scope, "heading": hit.heading,
                               "content": hit.content, "source": hit.source,
                               "authority": "locator_only"}, ensure_ascii=False))
+    elif args.command in {"image-import", "image-import-batch"}:
+        from .image_transfer import read_local_image, upload_to_server
+        from .image_evidence import metadata_values, scope_name
+        try:
+            scope_name(args.scope)
+            if args.command == "image-import":
+                if args.metadata.stat().st_size > 32768:
+                    raise ValueError("Metadados grandes demais.")
+                items = [{"file": str(args.file.resolve()), "metadata": json.loads(args.metadata.read_text(encoding="utf-8"))}]
+                base = Path.cwd()
+            else:
+                if args.manifest.stat().st_size > 256 * 1024:
+                    raise ValueError("Manifesto grande demais.")
+                items = json.loads(args.manifest.read_text(encoding="utf-8"))
+                base = args.manifest.resolve().parent
+            if not isinstance(items, list) or not 1 <= len(items) <= 50:
+                raise ValueError("Use uma lista de 1 a 50 imagens.")
+            # Check the manifest structure before any writes. Per-file failures
+            # remain explicit; a batch is not an all-or-nothing transaction.
+            for item in items:
+                if not isinstance(item, dict) or set(item) != {"file", "metadata"} or not isinstance(item["file"], str) or not item["file"]:
+                    raise ValueError("Cada item precisa de file e metadata.")
+                metadata_values(item["metadata"])
+            results = []
+            for index, item in enumerate(items):
+                try:
+                    raw = read_local_image(base / item["file"])
+                    result = (upload_to_server(args.server_url, args.scope, raw, item["metadata"], args.token_env)
+                              if args.server_url else omm.import_image(args.scope, raw, item["metadata"]))
+                    results.append({"index": index, "ok": True, "result": result})
+                except (OSError, ValueError) as exc:
+                    results.append({"index": index, "ok": False, **error_report(exc, "image-import")})
+            failed = sum(not result["ok"] for result in results)
+            print(json.dumps({"status": "partial" if failed else "completed", "failed": failed, "items": results}, ensure_ascii=False))
+            return 2 if failed else 0
+        except (OSError, ValueError) as exc:
+            print(json.dumps(error_report(exc, args.command), ensure_ascii=False), file=sys.stderr)
+            return 2
     elif args.command == "source-replace":
         try:
             result = omm.replace_source(args.path, args.file.read_text(encoding="utf-8"), args.expected_sha256)

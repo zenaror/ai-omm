@@ -20,6 +20,10 @@ O painel também mostra as regras cadastradas, a passagem de trabalho mais recen
 
 ## Abrir de outro computador
 
+No fim da página, **Evidências em imagens** permite guardar capturas com origem,
+consultar prévias e abrir os originais. A seção começa recolhida para não alongar
+a página. Veja [formatos, limites e envio em lote](IMAGENS.md).
+
 Por padrão, só o computador que executa a OMM consegue abrir o painel. Para permitir acesso de outros computadores da sua rede, defina no arquivo `.env`:
 
 ```env

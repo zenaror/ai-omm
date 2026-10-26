@@ -52,7 +52,7 @@ flowchart LR
     subgraph data[Repositório ou diretório de dados: /data]
       git[Git: histórico e sincronização]
       records[memory/*.jsonl e *.json]
-      sources[sources/*.md e *.pdf]
+      sources[Documentos e imagens em sources/]
       skills[skills/*/SKILL.md]
       git --- records
       git --- sources
@@ -117,7 +117,29 @@ sequenceDiagram
 
 O índice lexical acompanha um fingerprint dos registros e fontes Markdown. A assinatura inclui caminho, tamanho, `mtime` e `ctime`; uma verificação periódica evita trabalho repetido e a assinatura do próprio SQLite detecta se outro processo o alterou. Índice ausente, inválido ou incompatível é descartado e refeito a partir das fontes canônicas.
 
-`sources/` aceita Markdown e PDF no armazenamento/backup. A indexação lexical atual transforma arquivos Markdown em blocos de até 2.800 caracteres, respeitando títulos e guardando caminho e linhas de origem. Arquivos individuais acima de 20 MiB são ignorados na leitura Markdown. O parser deriva o escopo do primeiro diretório dentro de `sources/`; um arquivo diretamente em `sources/` recebe `global`. Para PDFs, o suporte de busca depende do extrator habilitado na instalação atual.
+`sources/` aceita Markdown, PDF e imagens PNG/JPEG/WebP no armazenamento/backup. A indexação lexical atual transforma arquivos Markdown em blocos de até 2.800 caracteres, respeitando títulos e guardando caminho e linhas de origem. Arquivos individuais acima de 20 MiB são ignorados na leitura Markdown. O parser deriva o escopo do primeiro diretório dentro de `sources/`; um arquivo diretamente em `sources/` recebe `global`. Para PDFs, o suporte de busca depende do extrator habilitado na instalação atual.
+
+### Evidências visuais
+
+`image_evidence.py` valida imagens estáticas com Pillow e preserva seus bytes.
+Cada original recebe um nome pelo SHA-256; uma descrição imutável
+`*.image-evidence.md` referencia esse original por nome relativo na mesma pasta.
+Isso preserva os vínculos em fusões de escopo. A descrição inclui metadados
+versionados e sua representação Markdown determinística; o formato v1 deve
+continuar legível em versões futuras. Só a parte humana entra no índice, sem
+duplicar o bloco JSON. Pixels não entram na indexação lexical ou semântica.
+
+O serviço usa o bloqueio de dados existente para escrita, limite de bytes/pixels,
+cota por escopo e criação atômica sem sobrescrita. Ferramentas de texto recusam
+editar descrições de imagem. Exclusão exige o SHA da descrição e preserva
+originais compartilhados por outras descrições na pasta. Backup e restauração
+validam imagens e pares descrição/original. O histórico Git não é purgado.
+
+O painel recebe multipart em `/api/images`, com Basic existente ou Bearer MCP
+restrito às rotas de imagens. Não aceita caminhos locais do cliente; a CLI envia
+bytes sem seguir redirecionamentos. A leitura MCP entrega `ImageContent` sob
+demanda, com prévia por padrão. O contador de uso contabiliza apenas o texto
+acompanhante, sem confundir base64 com tokens de texto. Veja [o guia](../IMAGENS.md).
 
 ## Camadas de retrieval
 

@@ -15,6 +15,13 @@ flowchart LR
 
 O [guia simples das ferramentas](FERRAMENTAS_MCP.md) mostra cada chamada, seus limites e exemplos.
 
+Para evidências visuais, [guarde a imagem com sua origem e descrição](IMAGENS.md).
+Isso vale para todos os projetos: selecione resultados úteis, agrupe envios
+equivalentes e preserve o vínculo de cada captura com seu caso de teste.
+Pesquise as descrições antes de pedir pixels. Abra o original apenas quando
+a prévia não bastar. Distinga observação, interpretação e limitações; guardar
+uma imagem não comprova, por si só, os critérios de aceitação de uma tarefa.
+
 ## 1. Conecte o assistente
 
 Siga [Ligar um assistente à OMM](USAR_MCP.md). Depois, confirme em uma conversa nova que o assistente consegue ver as ferramentas.

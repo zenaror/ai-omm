@@ -47,6 +47,7 @@ class SourceHit:
 def import_source_markdown(root: Path, scope: str, relative_path: str,
                            content: str) -> dict[str, object]:
     """Store one Markdown source below the canonical data root without overwriting."""
+    _editable_source(relative_path)
     if not isinstance(scope, str) or not _SCOPE.fullmatch(scope):
         raise ValueError("Escopo inválido. Use um nome simples, como pkhex-linux.")
     if not isinstance(relative_path, str) or not relative_path or "\\" in relative_path:
@@ -177,9 +178,15 @@ def read_source_markdown(root: Path, source: str, start_line: int,
     }
 
 
+def _editable_source(source: str) -> None:
+    if isinstance(source, str) and source.endswith(".image-evidence.md"):
+        raise ValueError("Descrições de imagens são preservadas com o original. Use o fluxo de evidências para importar ou remover; não edite como texto comum.")
+
+
 def replace_source_markdown(root: Path, source: str, content: str,
                             expected_sha256: str) -> dict[str, object]:
     """Replace one source only if its current content still matches the supplied hash."""
+    _editable_source(source)
     target = _managed_source_path(root, source)
     if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256 or ""):
         raise ValueError("Informe o sha256 atual da fonte para confirmar a edição.")
@@ -219,6 +226,7 @@ def replace_source_markdown(root: Path, source: str, content: str,
 def patch_source_markdown(root: Path, source: str, edits: list[dict],
                           expected_sha256: str) -> dict[str, object]:
     """Apply bounded literal edits against one original snapshot, never sequentially."""
+    _editable_source(source)
     from .redaction import find_credentials
 
     target = _managed_source_path(root, source)
@@ -263,6 +271,7 @@ def redact_source_spans_markdown(root: Path, source: str,
                                  spans: list[dict[str, int]],
                                  expected_sha256: str) -> dict[str, object]:
     """Redact selected 1-based character spans without returning source text."""
+    _editable_source(source)
     target = _managed_source_path(root, source)
     if not isinstance(expected_sha256, str) or not re.fullmatch(
             r"[a-fA-F0-9]{64}", expected_sha256):
@@ -361,6 +370,7 @@ def redact_source_spans_markdown(root: Path, source: str,
 def delete_source_markdown(root: Path, source: str,
                            expected_sha256: str) -> dict[str, object]:
     """Delete one source only after a caller confirms its current SHA-256."""
+    _editable_source(source)
     target = _managed_source_path(root, source)
     if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256 or ""):
         raise ValueError("Informe o sha256 atual da fonte para confirmar a remoção.")
@@ -386,6 +396,11 @@ def read_source_chunks(root: Path, max_chars: int = MAX_CHUNK_CHARS) -> list[Sou
         parts = path.relative_to(source_root).parts
         scope = parts[0] if len(parts) > 1 else "global"
         text = path.read_text(encoding="utf-8")
+        if path.name.endswith(".image-evidence.md"):
+            from .image_evidence import MARKER
+            body, marker, _ = text.rpartition(MARKER)
+            if marker:
+                text = body  # Search the human description once, not duplicated JSON metadata.
         headings: list[tuple[int, str]] = []
         current: list[tuple[int, str]] = []
         current_chars = 0

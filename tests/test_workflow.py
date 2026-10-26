@@ -657,7 +657,7 @@ class OMMWorkflowTests(unittest.TestCase):
 
             (pdf.parent / "invalid.pdf").unlink()
             (pdf.parent / "unsupported.bin").write_bytes(b"binary")
-            with self.assertRaisesRegex(BackupError, "use Markdown ou PDF"):
+            with self.assertRaisesRegex(BackupError, "use Markdown, PDF, PNG, JPEG ou WebP"):
                 backup_once(repository, "origin", "main", False, "", "", "OMM Backup", "omm@localhost")
 
     def test_sync_saves_local_mcp_changes_merges_backup_and_preserves_conflicts(self):

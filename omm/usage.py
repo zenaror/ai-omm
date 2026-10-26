@@ -49,6 +49,10 @@ class UsageRecorder:
     @staticmethod
     def _size(value) -> int:
         # No default=str: arbitrary object representations can be large or unsafe.
+        if isinstance(value, list) and any(getattr(item, "type", None) == "image" for item in value):
+            # MCP vision payloads are not text tokens. Count accompanying text
+            # only; never stringify pixels/base64 as if they were prose.
+            value = [item.text for item in value if getattr(item, "type", None) == "text"]
         try:
             return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
         except (TypeError, ValueError):
@@ -141,7 +145,7 @@ class UsageRecorder:
             raise ValueError(f"Escolha de 1 a {self.retention_days} dias.")
         result = {"enabled": self.enabled, "days": days, "retention_days": self.retention_days,
                   "timezone": "UTC", "transport": "MCP", "write_failures_since_start": self.write_failures,
-                  "measurement": "Caracteres JSON e tempo interno; não mede tokens cobrados, cache, rede ou descrições das ferramentas.",
+                  "measurement": "Caracteres JSON e tempo interno; não mede pixels/imagens, tokens cobrados, cache, rede ou descrições das ferramentas.",
                   "rows": [], "error_rows": [],
                   "error_measurement": "Categorias de falhas desde esta versão; falhas antigas não têm categoria. Sem mensagens de erro ou conteúdo das chamadas."}
         if not self.enabled or not self.path.exists():

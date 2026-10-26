@@ -7,6 +7,10 @@ detalhes da implementação.
 
 ### Adicionado
 
+- Imagens como evidência: envio pelo painel ou em lote, descrições pesquisáveis,
+  prévias para os assistentes e originais preservados no backup. Atualize também
+  o serviço de backup antes de enviar imagens.
+
 - Consulta, criação e atualização de frentes de trabalho pelo MCP. Atualizações
   exigem a versão lida e preservam o histórico.
 - Categorias de falha no relatório de uso, sem guardar mensagens ou conteúdo privado.

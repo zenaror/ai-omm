@@ -26,6 +26,7 @@ from .scope_merge import ScopeMergeError, apply_scope_merge, build_scope_merge_p
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
 from .locking import data_lock
+from . import image_evidence
 
 
 MAX_SEARCH_RESULTS = 100
@@ -382,6 +383,30 @@ class OMM:
         with self.operation_lock():
             self._ensure_index_current()
             return self.retriever.search_sources(query, max(0, min(int(limit), MAX_SOURCE_RESULTS)), scopes)
+
+    def import_image(self, scope: str, raw: bytes, metadata: dict) -> dict:
+        with self.operation_lock():
+            result = image_evidence.import_image(self.root, scope, raw, metadata)
+            self._index_schema_valid = False
+            return result
+
+    def list_images(self, scope: str, offset: int = 0, limit: int = 20) -> dict:
+        with self.operation_lock():
+            return image_evidence.list_images(self.root, scope, offset, limit)
+
+    def describe_image(self, path: str) -> dict:
+        with self.operation_lock():
+            return image_evidence.describe_image(self.root, path)
+
+    def read_image(self, path: str, variant: str = "preview") -> tuple[bytes, str, dict]:
+        with self.operation_lock():
+            return image_evidence.read_image(self.root, path, variant)
+
+    def delete_image(self, path: str, expected_sha256: str) -> dict:
+        with self.operation_lock():
+            result = image_evidence.delete_image(self.root, path, expected_sha256)
+            self._index_schema_valid = False
+            return result
 
     def import_source(self, scope: str, relative_path: str, content: str) -> dict[str, object]:
         """Import a Markdown source into canonical data and refresh retrieval lazily."""

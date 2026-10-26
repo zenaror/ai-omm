@@ -15,6 +15,9 @@ flowchart LR
 
 Os arquivos guardam a memória. O índice só ajuda a encontrá-la e pode ser recriado.
 
+Também é possível [guardar imagens como evidência](docs/IMAGENS.md), com origem,
+descrição pesquisável e original preservado. Os agentes abrem os pixels só quando precisam.
+
 ## Comece em poucos minutos
 
 Você precisa de Python 3.11 ou mais recente. Na pasta do projeto, instale e prepare a OMM:

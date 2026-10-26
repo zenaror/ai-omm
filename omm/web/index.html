@@ -105,6 +105,32 @@
         <section><h3>Materiais disponíveis</h3><div id="project-sources"></div></section>
       </div>
     </section>
+    <details id="image-panel" class="panel compact-panel">
+      <summary>Evidências em imagens</summary>
+      <p>Guarde uma captura com sua origem e o que ela mostra. O original será preservado; a busca usa a descrição.</p>
+      <form id="image-upload" class="image-form">
+        <label>Projeto<input id="image-scope" list="image-scopes" required maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,119}" placeholder="meu-projeto"></label>
+        <datalist id="image-scopes"></datalist>
+        <label>Título<input id="image-title" required maxlength="200" placeholder="Tela após o teste"></label>
+        <label>O que a imagem mostra<textarea id="image-description" required maxlength="4000" rows="3"></textarea></label>
+        <label>Origem e procedimento<textarea id="image-origin" required maxlength="1000" rows="2" placeholder="Ex.: captura do emulador, após abrir a tela de configurações"></textarea></label>
+        <label>Tipo de evidência<select id="image-type"><option value="other">Não classificada / outra</option><option value="emulator">Emulador</option><option value="hardware">Aparelho real</option><option value="static">Análise estática</option><option value="synthetic">Teste sintético</option></select></label>
+        <label>Limitações (opcional)<textarea id="image-limitations" maxlength="2000" rows="2" placeholder="Ex.: ainda não testado no aparelho real"></textarea></label>
+        <details><summary>Revisão e data (opcional)</summary>
+          <label>Repositório<input id="image-repository" maxlength="200" placeholder="equipe/projeto"></label>
+          <label>Commit completo<input id="image-revision" maxlength="64" placeholder="Hash de 40 ou 64 caracteres"></label>
+          <label>Build<input id="image-build" maxlength="200"></label>
+          <label>Data da captura com fuso<input id="image-date" maxlength="50" placeholder="2026-10-26T10:00:00Z"></label>
+        </details>
+        <label>Arquivos<input id="image-files" type="file" accept="image/png,image/jpeg,image/webp" multiple required></label>
+        <p class="small-note">PNG, JPEG ou WebP estático: até 10 MiB e 16 milhões de pixels por imagem. Até 20 arquivos por envio no painel. Em lote, a descrição vale para todos; cada nome de arquivo será acrescentado ao título. Confira dados pessoais na imagem e nos metadados antes de enviar. Não há leitura automática do texto da imagem.</p>
+        <button id="image-submit" type="submit">Guardar imagens</button>
+      </form>
+      <div id="image-upload-status" role="status" aria-live="polite"></div>
+      <button id="image-list" type="button">Consultar imagens deste projeto</button>
+      <div id="image-gallery" class="image-gallery"></div>
+      <button id="image-more" type="button" hidden>Mostrar mais imagens</button>
+    </details>
     <footer>As anotações ficam nos arquivos da OMM. A busca é um índice que pode ser recriado sem perder a memória.</footer>
   </main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
