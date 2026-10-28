@@ -1,7 +1,7 @@
 # Histórico de mudanças
 
 Mudanças que afetam quem usa ou mantém a OMM. O histórico de commits guarda os
-detalhes da implementação.
+detalhes da implementação. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/).
 
 ## [Não lançado]
 
@@ -28,3 +28,5 @@ detalhes da implementação.
 
 - Frentes aceitam o estado pausado. Use a mesma versão atualizada da OMM em todos
   os processos que acessam esses dados; versões antigas não consolidam suas revisões.
+- A documentação de entrada e a organização do repositório explicam melhor por
+  onde começar e como desenvolver a aplicação.
