@@ -13,16 +13,18 @@ Você pode pedir em português: “Procure na OMM onde paramos no meu projeto”
 | Retomar o trabalho | `context` |
 | Encontrar uma anotação | `search` → `get_memory` |
 | Conferir um documento | `search_sources` → `read_source` |
+| Conferir uma imagem | `list_image_evidence` → `read_image_evidence` |
 | Procurar pelo assunto | `semantic_search` → `semantic_index_status` se precisar |
 | Sugerir algo para guardar | `propose_memory` |
 | Guardar diretamente, com pedido da pessoa | `remember` |
 | Saber como trabalhar | `list_skills` → `get_skill` |
 | Saber quem faz o quê | `get_agent_topology`, `list_roles` → `get_role` |
 | Deixar o próximo passo | `handoff` |
+| Organizar frentes paralelas | `list_workstreams` → `get_workstream` |
 | Conferir uso e tamanho das chamadas | `usage_report` |
 | Investigar problema na instalação | `diagnose_setup` |
 
-As seções seguintes cobrem as **31 ferramentas MCP** da aplicação. As ferramentas disponíveis numa conexão podem variar com a versão instalada; depois de atualizar, reconecte o MCP.
+As seções seguintes explicam as ferramentas MCP da aplicação. As ferramentas disponíveis numa conexão podem variar com a versão instalada; depois de atualizar, reconecte o MCP.
 
 ## Medir o uso
 
@@ -36,9 +38,44 @@ Mostra quanto texto passa pelas ferramentas MCP e quantas chamadas foram feitas.
 
 O escopo é opcional. O relatório soma o período em UTC e mostra os 50 maiores grupos por ferramenta/projeto, incluindo falhas e tempos. Os totais incluem os grupos que ficaram fora da lista; `truncated=true` avisa o corte. Consulte um projeto específico para reduzir a resposta. A consulta ao relatório não conta a si mesma.
 
+`error_rows` mostra até 50 grupos de falhas por ferramenta, projeto e categoria,
+como `VERSION_CONFLICT`. `errors_truncated` avisa se há mais grupos.
+`classified_failures` conta as falhas com categoria; `unclassified_failures`
+inclui as antigas, quando essa informação ainda não era coletada. Não deduza
+a causa das falhas antigas a partir das novas. Erros de autenticação ou de
+validação do protocolo, que não chegaram à execução da ferramenta, ficam fora.
+
 **Limites:** são caracteres JSON e tempos internos, não tokens cobrados ou economia provada. Não inclui chamadas ao painel ou à CLI, tempo de rede, cache, descrições das ferramentas ou custos externos dos subagentes. Não guarda perguntas, respostas, senhas, mensagens de erro ou hashes de consultas. Não distingue clientes nem mede repetições. Os nomes de escopo são guardados; não coloque dados pessoais neles. Retém 30 dias por padrão em `.omm/usage.sqlite3`, fora do backup Git. A coleta começa nesta versão, sem histórico retroativo. Veja as [opções de coleta](USAR_OMM_NOS_AGENTES.md#medição-contínua-das-chamadas).
 
 ## Consultar o que já existe
+
+### Imagens: `list_image_evidence`, `read_image_evidence` e `delete_image_evidence`
+
+Liste primeiro as descrições, sem carregar imagens:
+
+```json
+{"scope": "meu-projeto", "offset": 0, "limit": 10}
+```
+
+`list_image_evidence` retorna até 20 itens por chamada, com `next_offset` quando
+há mais. Use o `path` devolvido em `read_image_evidence`:
+
+```json
+{"path": "sources/meu-projeto/evidence/HASH.image-evidence.md", "variant": "preview"}
+```
+
+O caminho acima é ilustrativo: copie o caminho real, não invente o hash.
+A leitura retorna descrição e um bloco de imagem para clientes com visão.
+`preview` limita a imagem a 512 pixels por lado; `original` preserva o arquivo completo.
+O custo visual depende do modelo e não é medido por `usage_report`.
+
+`delete_image_evidence` recebe `path` e `expected_sha256`, ambos da listagem atual.
+O hash é da descrição, não dos pixels. Só remova quando autorizado: a descrição
+some dos arquivos atuais e o original só sai se nenhuma outra descrição na pasta
+o usar. O histórico Git pode continuar guardando ambos.
+
+Não há upload de imagem em texto pelo MCP. Para enviar pelo painel, pela CLI ou
+por HTTP com os bytes do arquivo, siga [Guardar imagens como evidência](IMAGENS.md).
 
 ### `context`
 
@@ -444,7 +481,7 @@ Crie ou atualize as responsabilidades de um papel.
 
 Abra o mapa que diz quem coordena, quais ajudantes se aplicam e quais conversas são históricas.
 
-**O que acontece e o que conferir:** Consulta. Com scope, exige que o projeto tenha um perfil. Se não tiver, consulte sem scope para ler o padrão global. O mapa não inicia ajudantes: isso depende do aplicativo do assistente.
+**O que acontece e o que conferir:** Consulta. Com scope, retorna o perfil próprio quando existe (`profile_found=true`). Sem perfil próprio, já devolve o padrão global, com `profile_found=false` e `fallback=true`. Não cria perfil nem exige outra consulta. Um mapa inválido continua sendo erro. O mapa não inicia ajudantes: isso depende do aplicativo do assistente.
 
 **Exemplo de parâmetros:**
 
@@ -474,7 +511,17 @@ Ligue ao perfil do projeto uma conversa que já foi importada.
 
 ## Continuidade e organização dos projetos
 
+Confira [Continuidade e diagnóstico](CONTINUIDADE.md) para comparar revisões,
+entender códigos de erro e preservar um checkpoint quando o MCP faltar.
+O SHA do handoff e o HEAD do Git são identidades diferentes.
+
 ### `get_handoff`
+
+Além de estado e SHA, devolve `provenance` e `freshness`. Os argumentos opcionais
+`observed_repository` e `observed_revision` comparam uma observação do cliente
+com os campos registrados; não consultam o Git remoto nem comprovam testes.
+Sem informação suficiente, o resultado é `not_verified`, inclusive para
+checkpoints antigos sem revisão estruturada. Data antiga não significa divergência.
 
 Abre o bilhete completo do projeto ou da frente de trabalho e devolve seu SHA-256. Use antes de gravar outro bilhete. `context` é resumido: pode não mostrar todas as pendências necessárias à mesclagem.
 
@@ -491,6 +538,10 @@ Deixe o bilhete de passagem: onde parou, bloqueios, perguntas e próximos passos
 **O que acontece e o que conferir:** Grava uma passagem de trabalho. O novo handoff passa a representar o estado atual daquele escopo ou frente: leia o anterior e preserve o que ainda vale. As versões anteriores ficam registradas. Descobertas duradouras também merecem anotação própria.
 
 **Proteção contra outra sessão:** leia `get_handoff` e acrescente `expected_sha256` com o hash recebido. Se outra sessão atualizou o estado, a OMM recusa a gravação. Leia novamente, mescle e tente com o novo hash. Chamadas antigas sem hash continuam aceitas por compatibilidade, mas não têm essa proteção.
+
+`handoff` também aceita `repository`, `branch` e `git_revision` opcionais.
+Informe um identificador simples do repositório e HEAD completo, sem URL ou
+credencial. Esses campos não são inferidos do resumo nem certificados pelo servidor.
 
 **Exemplo de parâmetros:**
 
@@ -513,6 +564,8 @@ Deixe o bilhete de passagem: onde parou, bloqueios, perguntas e próximos passos
 
 ### `status`
 
+Para localizar uma frente sem carregar o estado geral, prefira `list_workstreams`.
+
 Veja as contagens da OMM e as frentes de trabalho registradas.
 
 **O que acontece e o que conferir:** Consulta. Ajuda a localizar estado e frentes, mas não prova que uma tarefa terminou nem que foi enviada ao backup remoto.
@@ -522,6 +575,44 @@ Veja as contagens da OMM e as frentes de trabalho registradas.
 ```json
 {}
 ```
+
+### `list_workstreams` e `get_workstream`
+
+Uma frente organiza trabalho paralelo. A lista usa páginas de 20 itens por padrão
+(até 100) e pode filtrar por estado. IDs são únicos em toda a OMM.
+
+```json
+{"status": "active", "offset": 0, "limit": 20}
+```
+
+Se vier `next_offset`, use esse número na consulta seguinte. Para abrir uma
+frente, chame `get_workstream` com `{"workstream_id":"meu-projeto-audio"}`.
+O resultado inclui o SHA atual. Uma tarefa única pode usar o handoff central
+sem cadastrar frente.
+
+### `create_workstream`
+
+Cadastre uma frente nova apenas quando a tarefa exigir e estiver autorizada.
+Confira a lista antes para evitar duplicatas. Use um ID com nome de projeto.
+
+```json
+{"workstream_id":"meu-projeto-audio","title":"Áudio","actor":"agente","status":"active"}
+```
+
+Isso não cria agentes, metas nativas ou handoffs, nem concede permissões.
+
+### `update_workstream`
+
+Mude o nome ou o estado usando o SHA de `get_workstream`.
+
+```json
+{"workstream_id":"meu-projeto-audio","status":"paused","actor":"agente","expected_sha256":"HASH_COMPLETO_DA_LEITURA"}
+```
+
+Substitua o hash pelo valor real. Os estados são `active`, `paused`, `completed`
+e `archived`. A ferramenta preserva as revisões anteriores e não muda handoffs.
+Em conflito, releia e mescle. Para concluir, registre antes no handoff as provas
+de que os critérios foram atendidos. O estado sozinho não prova conclusão.
 
 ### `merge_scope`
 

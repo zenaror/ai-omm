@@ -1,9 +1,32 @@
-# Changelog
+# Histórico de mudanças
 
-Este arquivo reúne as mudanças importantes para quem usa ou contribui com a aplicação. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/).
+Mudanças que afetam quem usa ou mantém a OMM. O histórico de commits guarda os
+detalhes da implementação. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/).
 
-## [Não publicado]
+## [Não lançado]
 
-### Modificado
+### Adicionado
 
-- A documentação de entrada e a organização do repositório agora explicam melhor por onde começar e como desenvolver a aplicação.
+- Imagens como evidência: envio pelo painel ou em lote, descrições pesquisáveis,
+  prévias para os assistentes e originais preservados no backup. Atualize também
+  o serviço de backup antes de enviar imagens.
+
+- Consulta, criação e atualização de frentes de trabalho pelo MCP. Atualizações
+  exigem a versão lida e preservam o histórico.
+- Categorias de falha no relatório de uso, sem guardar mensagens ou conteúdo privado.
+- Opção para reconstruir a busca semântica só dos projetos escolhidos.
+- Testes automáticos antes da publicação da imagem.
+
+### Corrigido
+
+- Projetos sem mapa próprio de agentes recebem as regras globais na mesma consulta,
+  em vez de um erro que exige outra tentativa.
+- Um teste antigo esperava que memórias substituídas voltassem à busca comum.
+  A conferência agora preserva a regra de mantê-las fora dessa busca.
+
+### Alterado
+
+- Frentes aceitam o estado pausado. Use a mesma versão atualizada da OMM em todos
+  os processos que acessam esses dados; versões antigas não consolidam suas revisões.
+- A documentação de entrada e a organização do repositório explicam melhor por
+  onde começar e como desenvolver a aplicação.

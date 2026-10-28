@@ -1,5 +1,110 @@
 const $ = (id) => document.getElementById(id);
 const state = { data: null, timer: null, reviewing: false };
+const imageState = {scope: "", next: null, loading: false};
+
+function imageUrl(path, variant = "preview") {
+  return "/api/images/content?" + new URLSearchParams({path, variant});
+}
+
+async function loadImageEvidence(more = false) {
+  const scope = $("image-scope").value.trim();
+  if (!scope || imageState.loading) return;
+  if (more && (imageState.next === null || imageState.scope !== scope)) return;
+  imageState.loading = true;
+  $("image-more").disabled = true;
+  try {
+    const offset = more ? imageState.next : 0;
+    const response = await fetch("/api/images?" + new URLSearchParams({scope, offset}));
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Não foi possível consultar as imagens.");
+    if ($("image-scope").value.trim() !== scope) return;
+    const gallery = $("image-gallery");
+    if (!more) gallery.replaceChildren();
+    imageState.scope = scope;
+    imageState.next = data.next_offset;
+    $("image-more").hidden = data.next_offset === null;
+    if (!data.total) gallery.append(el("p", "empty", "Nenhuma imagem guardada neste projeto."));
+    for (const item of data.items) {
+      const card = el("article", "image-card");
+      card.append(el("strong", null, item.title));
+      const preview = el("img");
+      preview.src = imageUrl(item.path);
+      preview.alt = item.description_excerpt;
+      preview.loading = "lazy";
+      card.append(preview, el("p", null, item.description_excerpt + (item.description_truncated ? "…" : "")),
+        el("p", "small-note", "Origem declarada: " + item.origin_excerpt),
+        el("p", "small-note", `${({hardware:"Aparelho real",emulator:"Emulador",static:"Análise estática",synthetic:"Teste sintético",other:"Outra"})[item.evidence_type] || item.evidence_type} · ${item.image.width} × ${item.image.height} · ${size(item.image.bytes)}`),
+        el("code", null, item.path));
+      const original = el("a", null, "Abrir original");
+      original.href = imageUrl(item.path, "original");
+      original.target = "_blank";
+      original.rel = "noopener";
+      const remove = el("button", "text-button", "Remover evidência");
+      remove.type = "button";
+      remove.addEventListener("click", () => deleteImageEvidence(item));
+      card.append(original, remove);
+      gallery.append(card);
+    }
+  } catch (error) { toast(error.message); }
+  finally { imageState.loading = false; $("image-more").disabled = false; }
+}
+
+async function deleteImageEvidence(item) {
+  if (!confirm("Remover esta descrição e o original, se nenhuma outra descrição o usar? Referências precisarão ser revistas. Versões antigas podem continuar no histórico Git.")) return;
+  try {
+    const response = await fetch("/api/images", {method: "DELETE", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path: item.path, expected_sha256: item.sha256})});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Não foi possível remover.");
+    toast(data.original_retained ? "Descrição removida. Original mantido por outra evidência." : "Evidência removida dos arquivos atuais.");
+    await loadImageEvidence();
+    load();
+  } catch (error) { toast(error.message); }
+}
+
+$("image-upload").addEventListener("submit", async event => {
+  event.preventDefault();
+  const files = Array.from($("image-files").files);
+  if (!files.length || files.length > 20 || files.some(file => !file.size || file.size > 10 * 1024 * 1024)) {
+    toast("Escolha de 1 a 20 imagens, com até 10 MiB cada."); return;
+  }
+  const scope = $("image-scope").value.trim();
+  const metadata = {title: $("image-title").value, description: $("image-description").value,
+    origin: $("image-origin").value, limitations: $("image-limitations").value,
+    evidence_type: $("image-type").value, repository: $("image-repository").value,
+    git_revision: $("image-revision").value, build: $("image-build").value, captured_at: $("image-date").value};
+  $("image-submit").disabled = true;
+  const results = [];
+  try {
+    for (const [index, file] of files.entries()) {
+      $("image-upload-status").textContent = `Enviando ${index + 1} de ${files.length}…\n` + results.join("\n");
+      const form = new FormData();
+      form.append("scope", scope);
+      const title = files.length > 1 ? (metadata.title + " — " + file.name).slice(0, 200) : metadata.title;
+      form.append("metadata", JSON.stringify({...metadata, title}));
+      form.append("file", file);
+      try {
+        const response = await fetch("/api/images", {method: "POST", body: form});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Envio recusado.");
+        results.push(`${file.name}: ${data.status === "already_present" ? "já estava guardada" : "guardada"}.`);
+      } catch (error) { results.push(`${file.name}: falha — ${error.message}`); }
+    }
+    $("image-upload-status").textContent = results.join("\n") + "\nA gravação na OMM não confirma envio ao backup remoto.";
+    await loadImageEvidence();
+    load();
+  } finally { $("image-submit").disabled = false; }
+});
+$("image-list").addEventListener("click", () => loadImageEvidence());
+$("image-more").addEventListener("click", () => loadImageEvidence(true));
+$("image-panel").addEventListener("toggle", () => {
+  if (!$("image-panel").open) return;
+  const choices = $("image-scopes");
+  choices.replaceChildren();
+  for (const scope of state.data?.scopes || []) addOption(choices, scope, scope);
+  if (!$("image-scope").value) $("image-scope").value = $("scope").value;
+  loadImageEvidence();
+});
 const typeLabels = {fact:"Fato",observation:"Observação",hypothesis:"Hipótese",unknown:"Dúvida",decision:"Decisão",conclusion:"Conclusão",constraint:"Regra",contract:"Contrato"};
 function el(tag, cls, text) { const node=document.createElement(tag); if(cls) node.className=cls; if(text!==undefined) node.textContent=text; return node; }
 function size(bytes) { if(bytes<1024) return `${bytes} B`; if(bytes<1048576) return `${(bytes/1024).toFixed(1)} KB`; return `${(bytes/1048576).toFixed(2)} MB`; }
@@ -109,7 +214,7 @@ function renderOpenQuestions(items, labels){
     card.append(meta);box.append(card);
   }
 }
-function renderSources(items, searched){const box=$("sources");box.replaceChildren();$("sources-panel").classList.toggle("hidden",!searched);if(!searched)return;if(!items.length){box.append(el("div","empty","Nenhum trecho de documento-fonte encontrado para esta busca."));return;}for(const item of items){const card=el("article","source-hit"),head=el("div","source-hit-head");head.append(el("strong",null,item.heading||item.source),el("span","scope-tag",item.scope));card.append(head,el("p",null,item.content+(item.truncated?"…":"")),el("small",null,"Localizador: "+item.source));box.append(card);}box.append(el("p","small-note","Estes trechos ajudam a localizar material. Abra a fonte e confira o contexto antes de usar como evidência."));}
+function renderSources(items, searched){const box=$("sources");box.replaceChildren();$("sources-panel").classList.toggle("hidden",!searched);if(!searched)return;if(!items.length){box.append(el("div","empty","Nenhum trecho de documento-fonte encontrado para esta busca."));return;}for(const item of items){const card=el("article","source-hit"),head=el("div","source-hit-head");head.append(el("strong",null,item.heading||item.source),el("span","scope-tag",item.scope));card.append(head,el("p",null,item.content+(item.truncated?"…":"")),el("small",null,"Localizador: "+item.source));if(item.evidence_path){const link=el("a",null,"Ver imagem original");link.href=imageUrl(item.evidence_path,"original");link.target="_blank";link.rel="noopener";card.append(link);}box.append(card);}box.append(el("p","small-note","Estes trechos ajudam a localizar material. Abra a fonte e confira o contexto antes de usar como evidência."));}
 function renderProposals(items,total){$("approve-all").disabled=$("reject-all").disabled=!total||state.reviewing;const panel=$("proposals-panel"),box=$("proposals");box.replaceChildren();if(!total)box.append(el("div","empty","Nenhuma sugestão aguardando revisão."));$("proposals-title").textContent=`Sugestões de memória (${total})`;$("proposal-limit").classList.toggle("hidden",total<=items.length);for(const proposal of items){const memory=proposal.record,card=el("article","proposal-card"),head=el("div","record-head");head.append(el("h3",null,memory.title),el("span","scope-tag",memory.scope));card.append(head,el("p","proposal-content",memory.content));card.append(el("small","source","Origem: "+memory.source));if(memory.evidence?.length)card.append(el("small","source","Evidência: "+memory.evidence.join(" · ")));if(proposal.possible_matches?.length){card.append(el("strong","proposal-matches-title","Possíveis anotações parecidas"));for(const match of proposal.possible_matches){const matchCard=el("div","proposal-match");matchCard.append(el("strong",null,match.title),el("p",null,match.content),el("small",null,`${match.scope} · ${match.source}`));card.append(matchCard);}}else card.append(el("p","small-note","Nenhuma anotação parecida apareceu na busca textual."));const actions=el("div","proposal-actions"),approve=el("button","refresh-button proposal-approve","Aprovar e guardar"),reject=el("button","text-button proposal-reject","Recusar");approve.type=reject.type="button";approve.addEventListener("click",()=>reviewProposal(proposal,"approve"));reject.addEventListener("click",()=>reviewProposal(proposal,"reject"));actions.append(approve,reject);card.append(actions);box.append(card);}}
 async function reviewAllProposals(action) {
   if (state.reviewing) return;
@@ -144,6 +249,6 @@ function renderOrganization(org){const summary=$("organization-summary"),agents=
 async function load(){const params=new URLSearchParams();if($("search").value.trim())params.set("q",$("search").value.trim());if($("scope").value)params.set("scope",$("scope").value);if($("archived").checked)params.set("archived","1");try{const response=await fetch("/api/dashboard?"+params);const data=await response.json();if(!response.ok)throw new Error(data.error||"Falha ao carregar.");render(data);}catch(error){toast(error.message);}}
 async function changeStatus(item){const next=item.status==="active"?"retracted":"active";if(next==="retracted"&&!confirm("Tirar esta anotação das buscas? Ela continuará guardada no histórico do Git."))return;try{const response=await fetch(`/api/records/${encodeURIComponent(item.id)}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:next})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível atualizar.");toast(next==="active"?"Anotação restaurada.":"Anotação arquivada.");load();}catch(error){toast(error.message);}}
 async function deleteRecord(item){if(!confirm("Apagar esta anotação dos arquivos atuais? Esta ação não pode ser desfeita pelo painel. Cópias antigas ainda podem existir no histórico do Git."))return;try{const response=await fetch(`/api/records/${encodeURIComponent(item.id)}`,{method:"DELETE"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível apagar.");toast("Anotação apagada dos arquivos atuais.");load();}catch(error){toast(error.message);}}
-async function deleteSource(item){if(!confirm(`Remover “${item.path}” dos arquivos atuais da OMM? A fonte deixa de aparecer nas buscas. Versões anteriores podem continuar no histórico do Git.`))return;try{const response=await fetch("/api/sources",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:item.path,expected_sha256:item.sha256})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível remover a fonte.");toast("Fonte removida dos arquivos atuais.");load();}catch(error){toast(error.message);}}
+async function deleteSource(item){if(item.image_evidence){return deleteImageEvidence(item);}if(!confirm(`Remover “${item.path}” dos arquivos atuais da OMM? A fonte deixa de aparecer nas buscas. Versões anteriores podem continuar no histórico do Git.`))return;try{const response=await fetch("/api/sources",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:item.path,expected_sha256:item.sha256})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível remover a fonte.");toast("Fonte removida dos arquivos atuais.");load();}catch(error){toast(error.message);}}
 async function syncBackup(){if(!confirm("Sincronizar com o backup Git agora? A OMM vai salvar as alterações atuais, buscar atualizações e enviar a versão combinada."))return;const button=$("sync");button.disabled=true;try{const response=await fetch("/api/sync",{method:"POST"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Não foi possível sincronizar.");toast(data.message||"Backup sincronizado.");load();}catch(error){toast(error.message);}finally{button.disabled=false;}}
 $("sync").addEventListener("click",syncBackup);$("refresh").addEventListener("click",load);$("scope").addEventListener("change",load);$("question-scope").addEventListener("change",()=>renderOpenQuestions(state.data?.open_questions||[],state.data?.scope_labels||{}));$("archived").addEventListener("change",load);$("search").addEventListener("input",()=>{clearTimeout(state.timer);state.timer=setTimeout(load,250);});load();

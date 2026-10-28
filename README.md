@@ -15,6 +15,9 @@ flowchart LR
 
 Os arquivos guardam a memória. O índice só ajuda a encontrá-la e pode ser recriado.
 
+Também é possível [guardar imagens como evidência](docs/IMAGENS.md), com origem,
+descrição pesquisável e original preservado. Os agentes abrem os pixels só quando precisam.
+
 ## Comece em poucos minutos
 
 Você precisa de Python 3.11 ou mais recente. Na pasta do projeto, instale e prepare a OMM:
@@ -50,11 +53,20 @@ Depois, configure o assistente para acessar `http://localhost:8000/mcp` e diga a
 
 Para entender o que cada ferramenta faz, consulte o [guia simples das ferramentas MCP](docs/FERRAMENTAS_MCP.md), com exemplos de consulta, memória, fontes, skills e handoffs.
 
+Para conferir a revisão de um checkpoint, entender erros ou continuar com
+segurança quando a conexão faltar, veja [Continuidade e diagnóstico](docs/CONTINUIDADE.md).
+
 Siga o guia [Como usar a OMM nos agentes](docs/USAR_OMM_NOS_AGENTES.md). Para instruções de conexão, consulte [Ligar um assistente](docs/USAR_MCP.md). Também há guias para [Podman](docs/USAR_PODMAN.md) e [o painel web](docs/PAINEL_WEB.md).
 
 Por padrão, a OMM usa busca textual local. A busca semântica é opcional: em vez de exigir as mesmas palavras, ela tenta encontrar o mesmo assunto. Na stack Docker, o perfil opcional `semantic` inicia o Ollama e baixa um modelo pequeno para essa tarefa. Veja [como ativar](docs/USAR_MCP.md#busca-semântica-procurar-pelo-assunto). Agentes podem sugerir memórias para aprovação no painel.
 
 Para economizar contexto, agentes podem corrigir trechos com `patch_source`, sem reenviar documentos inteiros. `get_handoff` e o hash esperado em `handoff` protegem a passagem de trabalho contra outra sessão. `usage_report` mostra contagens e tamanhos das chamadas MCP sem guardar seu texto; não mede tokens faturados. Veja [ferramentas e exemplos](docs/FERRAMENTAS_MCP.md) e [as orientações de uso](docs/USAR_OMM_NOS_AGENTES.md#economia-de-contexto-sem-perder-continuidade).
+
+Projetos sem mapa próprio de agentes recebem as regras globais na mesma consulta.
+Frentes paralelas podem ser consultadas e atualizadas pelo MCP, com proteção por
+SHA. O relatório de uso separa as categorias de falha, e a CLI permite reconstruir
+a busca semântica só dos projetos escolhidos. Depois de atualizar o servidor,
+reconecte o MCP para ver as ferramentas novas.
 
 Para conferir se a busca encontra exemplos esperados, rode `python3 benchmarks/retrieval_eval.py`. O conjunto usa dados inventados e inclui documentos parecidos para a posição dos resultados importar. Com `--json`, a saída pode ser lida por uma automação; `--min-hit-rate-at-3` e `--min-mrr-at-5` definem limites entre `0` e `1` e fazem o comando terminar com erro se a busca cair abaixo deles (`0.8` significa 80%). O exemplo só mede busca por palavras, sem Ollama.
 

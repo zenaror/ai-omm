@@ -13,6 +13,7 @@ from datetime import datetime
 from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo
 from .locking import data_lock
+from .image_evidence import CARD_SUFFIX, IMAGE_SUFFIXES, MAX_IMAGE_BYTES, inspect_image, read_image
 
 CANONICAL_PATHS = ("memory", "skills", "sources")
 MAX_SOURCE_PDF_BYTES = 100 * 1024 * 1024
@@ -64,6 +65,8 @@ def _validate_sources(root: Path) -> None:
         try:
             if suffix == ".md":
                 path.read_text(encoding="utf-8")
+                if path.name.endswith(CARD_SUFFIX):
+                    read_image(root, path.relative_to(root).as_posix(), "original")
             elif suffix == ".pdf":
                 if path.stat().st_size > MAX_SOURCE_PDF_BYTES:
                     raise BackupError(f"PDF-fonte excede 100 MB: {path.relative_to(root)}")
@@ -71,11 +74,14 @@ def _validate_sources(root: Path) -> None:
                     header = source.read(1024)
                 if b"%PDF-" not in header:
                     raise BackupError(f"PDF-fonte inválido em {path.relative_to(root)}")
+            elif suffix in IMAGE_SUFFIXES:
+                with path.open("rb") as source:
+                    inspect_image(source.read(MAX_IMAGE_BYTES + 1))
             else:
                 raise BackupError(
-                    f"formato ainda não aceito em sources/: {path.relative_to(root)} (use Markdown ou PDF)"
+                    f"formato ainda não aceito em sources/: {path.relative_to(root)} (use Markdown, PDF, PNG, JPEG ou WebP)"
                 )
-        except (OSError, UnicodeError) as exc:
+        except (OSError, UnicodeError, ValueError) as exc:
             raise BackupError(f"documento-fonte inválido em {path.relative_to(root)}: {exc}") from exc
 
 

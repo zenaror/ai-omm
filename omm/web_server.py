@@ -1,4 +1,4 @@
-"""Small, dependency-free web screen for managing a trusted local OMM."""
+"""Small stdlib HTTP server for managing a trusted local OMM."""
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +20,9 @@ from .topology import TopologyError, load_topology
 from .sync import SyncError, sync_with_backup
 from .backup_worker import BackupError
 from .skills import resolve_skill_chain, skill_catalog
+from .errors import error_report
+from .image_evidence import CARD_SUFFIX
+from .image_transfer import MAX_UPLOAD_BYTES, parse_upload
 
 
 def _json_lines(path: Path) -> list[dict]:
@@ -84,7 +87,7 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             source_hits = [
                 {"id": hit.id, "scope": hit.scope, "heading": hit.heading,
                  "content": hit.content[:1000], "truncated": len(hit.content) > 1000,
-                 "source": hit.source}
+                 "source": hit.source, "evidence_path": hit.path if hit.path.endswith(CARD_SUFFIX) else None}
                 for hit in omm.search_sources(query, 8, scopes=[scope] if scope else None)
             ]
             context_scopes = [scope] if scope else ["global"]
@@ -197,6 +200,7 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
                     path.stem.replace("-", " "),
                 )
                 project_sources.append({"path": relative, "title": first_heading,
+                                        "image_evidence": path.name.endswith(CARD_SUFFIX),
                                         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                                         "bytes": path.stat().st_size})
         scoped_records = [r for r in active if r.scope == scope] if scope else []
@@ -308,10 +312,43 @@ def make_handler(omm: OMM):
             except ValueError:
                 return False
 
+        def _authorized_image(self) -> bool:
+            supplied = self.headers.get("Authorization", "")
+            if supplied.lower().startswith("bearer "):
+                expected = os.getenv("OMM_MCP_TOKEN", "")
+                token = supplied[7:]
+                if expected and hmac.compare_digest(token.encode(), expected.encode()):
+                    return True
+                self._send_json(401, {"error": "Token de acesso recusado."})
+                return False
+            return self._authorized()
+
+        def _image_error(self, error: Exception) -> None:
+            report = error_report(error, "image_evidence")["error"]
+            status = 404 if isinstance(error, FileNotFoundError) else 400
+            if report["code"] == "VERSION_CONFLICT":
+                status = 409
+            self._send_json(status, {"error": report["message"], "code": report["code"],
+                                     "recovery": report["recovery"]})
+
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+            parsed = urlsplit(self.path)
+            if parsed.path in {"/api/images", "/api/images/content"}:
+                if not self._authorized_image():
+                    return
+                params = parse_qs(parsed.query)
+                try:
+                    if parsed.path == "/api/images":
+                        self._send_json(200, omm.list_images(params.get("scope", [""])[0],
+                                                            int(params.get("offset", ["0"])[0]), 10))
+                    else:
+                        raw, mime, _ = omm.read_image(params.get("path", [""])[0], params.get("variant", ["preview"])[0])
+                        self._send(200, raw, mime)
+                except (OSError, ValueError, TypeError) as exc:
+                    self._image_error(exc)
+                return
             if not self._authorized():
                 return
-            parsed = urlsplit(self.path)
             if parsed.path == "/":
                 self._send(200, (web_root / "index.html").read_bytes(), "text/html; charset=utf-8")
                 return
@@ -332,10 +369,28 @@ def make_handler(omm: OMM):
             self._send_json(404, {"error": "Página não encontrada."})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-            if not self._authorized():
+            is_image = urlsplit(self.path).path == "/api/images"
+            if not (self._authorized_image() if is_image else self._authorized()):
                 return
             if not self._same_origin():
                 self._send_json(403, {"error": "Pedido recusado: a página de origem não é a OMM."})
+                return
+            if is_image:
+                try:
+                    size = int(self.headers.get("Content-Length", "0"))
+                    if self.headers.get("Transfer-Encoding") or not 1 <= size <= MAX_UPLOAD_BYTES:
+                        self.close_connection = True
+                        self._send_json(413, {"error": "Cada imagem precisa ter até 10 MiB. Envie um arquivo por pedido."})
+                        return
+                    self.connection.settimeout(30)
+                    body = self.rfile.read(size)
+                    if len(body) != size:
+                        raise ValueError("Envio incompleto.")
+                    scope, raw, metadata = parse_upload(self.headers.get("Content-Type", ""), body)
+                    result = omm.import_image(scope, raw, metadata)
+                    self._send_json(200 if result["status"] == "already_present" else 201, result)
+                except (OSError, ValueError, TypeError) as exc:
+                    self._image_error(exc)
                 return
             if urlsplit(self.path).path == "/api/proposals/review-batch":
                 try:
@@ -409,10 +464,23 @@ def make_handler(omm: OMM):
                 self._send_json(400, {"error": str(exc) or "Pedido inválido."})
 
         def do_DELETE(self) -> None:  # noqa: N802 - stdlib handler API
-            if not self._authorized():
+            is_image = urlsplit(self.path).path == "/api/images"
+            if not (self._authorized_image() if is_image else self._authorized()):
                 return
             if not self._same_origin():
                 self._send_json(403, {"error": "Pedido recusado: a página de origem não é a OMM."})
+                return
+            if is_image:
+                try:
+                    size = int(self.headers.get("Content-Length", "0"))
+                    if not 1 <= size <= 4096:
+                        raise ValueError("Pedido inválido.")
+                    payload = json.loads(self.rfile.read(size))
+                    if not isinstance(payload, dict):
+                        raise ValueError("Pedido inválido.")
+                    self._send_json(200, omm.delete_image(payload.get("path", ""), payload.get("expected_sha256", "")))
+                except (OSError, ValueError, TypeError) as exc:
+                    self._image_error(exc)
                 return
             if urlsplit(self.path).path == "/api/sources":
                 try:

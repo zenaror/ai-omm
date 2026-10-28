@@ -11,6 +11,7 @@ import stat
 import tempfile
 from datetime import datetime, timezone
 from typing import Any
+from .image_evidence import IMAGE_SUFFIXES, MAX_IMAGE_BYTES, inspect_image
 
 
 _SCOPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$")
@@ -139,9 +140,16 @@ def _source_files(root: Path, source: str, target: str) -> tuple[list[dict[str, 
         if not path.is_file():
             blockers.append(f"Há um item que não é arquivo comum em sources/{source}.")
             continue
-        if path.suffix.lower() != ".md":
-            blockers.append(f"A OMM só guarda documentos Markdown; formato não aceito em {path.relative_to(root)}.")
+        if path.suffix.lower() not in {".md", *IMAGE_SUFFIXES}:
+            blockers.append(f"Formato não aceito na mesclagem: {path.relative_to(root)}.")
             continue
+        if path.suffix.lower() in IMAGE_SUFFIXES:
+            try:
+                with path.open("rb") as image:
+                    inspect_image(image.read(MAX_IMAGE_BYTES + 1))
+            except (ValueError, OSError):
+                blockers.append(f"Imagem inválida na origem: {path.relative_to(root)}.")
+                continue
         if not path.resolve().is_relative_to(source_dir.resolve()):
             blockers.append(f"Uma fonte sai da pasta sources/{source}.")
             continue

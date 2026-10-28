@@ -160,7 +160,11 @@ class OMMWorkflowTests(unittest.TestCase):
         self.assertEqual(updated.tags, record.tags)
         self.assertEqual(updated.created_by, record.created_by)
         self.assertEqual(self.omm.search("g123456789", scopes=["demo"]), [])
-        self.assertEqual(self.omm.search("REON ACCOUNT ID REMOVED", scopes=["demo"])[0].id, record.id)
+        # Redaction preserves the superseded status: neither the old value nor
+        # the replacement marker should revive this record in ordinary search.
+        self.assertEqual(self.omm.search("REON ACCOUNT ID REMOVED", scopes=["demo"]), [])
+        with sqlite3.connect(self.root / ".omm/index.sqlite3") as db:
+            self.assertIsNone(db.execute("SELECT id FROM records WHERE id=?", (record.id,)).fetchone())
 
     def test_memory_redaction_rejects_active_records_and_no_match(self):
         active = MemoryRecord(kind="fact", title="Current note", content="Current account g987654321.",
@@ -653,7 +657,7 @@ class OMMWorkflowTests(unittest.TestCase):
 
             (pdf.parent / "invalid.pdf").unlink()
             (pdf.parent / "unsupported.bin").write_bytes(b"binary")
-            with self.assertRaisesRegex(BackupError, "use Markdown ou PDF"):
+            with self.assertRaisesRegex(BackupError, "use Markdown, PDF, PNG, JPEG ou WebP"):
                 backup_once(repository, "origin", "main", False, "", "", "OMM Backup", "omm@localhost")
 
     def test_sync_saves_local_mcp_changes_merges_backup_and_preserves_conflicts(self):

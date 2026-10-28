@@ -17,6 +17,7 @@ from .restore import RestoreError, restore_from_git
 from .sync import SyncError, preview_sync, sync_with_backup_report
 from .backup_worker import BackupError
 from .scope_merge import ScopeMergeError
+from .errors import OMMError, error_report
 
 
 def parser() -> argparse.ArgumentParser:
@@ -55,6 +56,17 @@ def parser() -> argparse.ArgumentParser:
     source_delete = sub.add_parser("source-delete", help="remover um documento-fonte dos arquivos atuais")
     source_delete.add_argument("path", help="caminho completo, por exemplo sources/projeto/notas.md")
     source_delete.add_argument("--expected-sha256", required=True, help="sha256 atual da fonte, obtido antes da remoção")
+    for command, help_text in (("image-import", "guardar uma imagem com descrição"),
+                               ("image-import-batch", "guardar um lote de imagens descrito por manifesto JSON")):
+        image_parser = sub.add_parser(command, help=help_text)
+        image_parser.add_argument("--scope", required=True, help="projeto dono das evidências")
+        image_parser.add_argument("--server-url", help="URL do painel remoto; sem ela, grava nos dados locais de --root")
+        image_parser.add_argument("--token-env", default="OMM_MCP_TOKEN", help="variável de ambiente com token MCP; nunca informe o token no manifesto")
+        if command == "image-import":
+            image_parser.add_argument("--file", type=Path, required=True)
+            image_parser.add_argument("--metadata", type=Path, required=True, help="JSON com title, description, origin e campos opcionais")
+        else:
+            image_parser.add_argument("--manifest", type=Path, required=True, help="JSON com lista de até 50 itens file/metadata; caminhos relativos ao manifesto")
     merge_scope = sub.add_parser("merge-scope", help="unir os dados de um escopo de projeto em outro")
     merge_scope.add_argument("source_scope", help="escopo que será incorporado")
     merge_scope.add_argument("target_scope", help="escopo que continuará como nome canônico")
@@ -67,7 +79,8 @@ def parser() -> argparse.ArgumentParser:
     semantic.add_argument("--mode", choices=["all", "memory", "sources"], default="all")
     semantic.add_argument("--limit", type=int, default=5)
     semantic.add_argument("--scope", action="append", help="limitar aos projetos informados")
-    sub.add_parser("semantic-rebuild", help="recriar o índice semântico local")
+    semantic_rebuild = sub.add_parser("semantic-rebuild", help="recriar o índice semântico local")
+    semantic_rebuild.add_argument("--scope", action="append", help="recriar só este projeto; pode repetir. Sem esta opção, recria tudo")
     sub.add_parser("semantic-compact", help="reduzir o espaço do índice semântico local sem recalcular vetores")
     context = sub.add_parser("context", help="preparar um resumo para passar a um assistente")
     context.add_argument("query")
@@ -86,6 +99,15 @@ def parser() -> argparse.ArgumentParser:
     handoff.add_argument("--session-id", help="identificador da conversa relacionada")
     handoff.add_argument("--workstream-id", help="frente de trabalho relacionada")
     handoff.add_argument("--scope", default="default", help="alcance da passagem de trabalho")
+    handoff.add_argument("--expected-sha256", help="sha256 completo obtido com handoff-show antes de mesclar")
+    handoff.add_argument("--repository", help="identificador do repositório, por exemplo equipe/projeto; sem URL")
+    handoff.add_argument("--branch", help="branch observada no checkout")
+    handoff.add_argument("--git-revision", help="HEAD completo observado no checkout")
+    handoff_show = sub.add_parser("handoff-show", help="ler checkpoint, procedência e SHA para uma atualização protegida")
+    handoff_show.add_argument("--scope", default="default")
+    handoff_show.add_argument("--workstream-id")
+    handoff_show.add_argument("--observed-repository", help="identificador do repositório local conferido")
+    handoff_show.add_argument("--observed-revision", help="HEAD completo local conferido para comparar")
     sub.add_parser("rebuild", help="recriar a busca a partir dos arquivos de memória")
     restore = sub.add_parser("restore", help="restaurar a memória a partir de um repositório Git")
     restore.add_argument("--from", dest="source", required=True, help="URL ou caminho do repositório de backup")
@@ -100,8 +122,16 @@ def parser() -> argparse.ArgumentParser:
     workstream_create.add_argument("--id", required=True, help="identificador curto, sem espaços")
     workstream_create.add_argument("--title", required=True, help="nome da frente de trabalho")
     workstream_create.add_argument("--by", default="human", help="quem registrou a frente")
-    workstream_create.add_argument("--status", choices=["active", "completed", "archived"], default="active", help="estado da frente")
+    workstream_create.add_argument("--status", choices=["active", "paused", "completed", "archived"], default="active", help="estado da frente")
     workstream_sub.add_parser("list", help="mostrar as frentes de trabalho")
+    workstream_show = workstream_sub.add_parser("show", help="ler uma frente e seu SHA atual")
+    workstream_show.add_argument("--id", required=True)
+    workstream_update = workstream_sub.add_parser("update", help="atualizar uma frente sem sobrescrever uma versão nova")
+    workstream_update.add_argument("--id", required=True)
+    workstream_update.add_argument("--expected-sha256", required=True)
+    workstream_update.add_argument("--title")
+    workstream_update.add_argument("--status", choices=["active", "paused", "completed", "archived"])
+    workstream_update.add_argument("--by", default="human")
     history = sub.add_parser("history", help="revisar anotações extraídas de conversas antigas")
     history_sub = history.add_subparsers(dest="history_command", required=True)
     history_stage = history_sub.add_parser("stage", help="preparar anotações para revisão; elas ainda não entram na memória")
@@ -158,6 +188,44 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"id": hit.id, "scope": hit.scope, "heading": hit.heading,
                               "content": hit.content, "source": hit.source,
                               "authority": "locator_only"}, ensure_ascii=False))
+    elif args.command in {"image-import", "image-import-batch"}:
+        from .image_transfer import read_local_image, upload_to_server
+        from .image_evidence import metadata_values, scope_name
+        try:
+            scope_name(args.scope)
+            if args.command == "image-import":
+                if args.metadata.stat().st_size > 32768:
+                    raise ValueError("Metadados grandes demais.")
+                items = [{"file": str(args.file.resolve()), "metadata": json.loads(args.metadata.read_text(encoding="utf-8"))}]
+                base = Path.cwd()
+            else:
+                if args.manifest.stat().st_size > 256 * 1024:
+                    raise ValueError("Manifesto grande demais.")
+                items = json.loads(args.manifest.read_text(encoding="utf-8"))
+                base = args.manifest.resolve().parent
+            if not isinstance(items, list) or not 1 <= len(items) <= 50:
+                raise ValueError("Use uma lista de 1 a 50 imagens.")
+            # Check the manifest structure before any writes. Per-file failures
+            # remain explicit; a batch is not an all-or-nothing transaction.
+            for item in items:
+                if not isinstance(item, dict) or set(item) != {"file", "metadata"} or not isinstance(item["file"], str) or not item["file"]:
+                    raise ValueError("Cada item precisa de file e metadata.")
+                metadata_values(item["metadata"])
+            results = []
+            for index, item in enumerate(items):
+                try:
+                    raw = read_local_image(base / item["file"])
+                    result = (upload_to_server(args.server_url, args.scope, raw, item["metadata"], args.token_env)
+                              if args.server_url else omm.import_image(args.scope, raw, item["metadata"]))
+                    results.append({"index": index, "ok": True, "result": result})
+                except (OSError, ValueError) as exc:
+                    results.append({"index": index, "ok": False, **error_report(exc, "image-import")})
+            failed = sum(not result["ok"] for result in results)
+            print(json.dumps({"status": "partial" if failed else "completed", "failed": failed, "items": results}, ensure_ascii=False))
+            return 2 if failed else 0
+        except (OSError, ValueError) as exc:
+            print(json.dumps(error_report(exc, args.command), ensure_ascii=False), file=sys.stderr)
+            return 2
     elif args.command == "source-replace":
         try:
             result = omm.replace_source(args.path, args.file.read_text(encoding="utf-8"), args.expected_sha256)
@@ -192,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(omm.semantic_search(args.query, args.mode, args.limit, args.scope),
                          ensure_ascii=False, indent=2))
     elif args.command == "semantic-rebuild":
-        print(f"Índice semântico recriado: {omm.rebuild_semantic()} itens")
+        print(f"Índice semântico recriado: {omm.rebuild_semantic(args.scope)} itens")
     elif args.command == "semantic-compact":
         try:
             result = omm.compact_semantic_index()
@@ -204,10 +272,21 @@ def main(argv: list[str] | None = None) -> int:
         state_scope = args.scope[-1] if args.scope else None
         sys.stdout.write(omm.context(args.query, args.limit, args.workstream_id, args.scope, state_scope,
                                      include_sources=args.include_sources, budget_chars=args.budget_chars))
-    elif args.command == "handoff":
-        omm.handoff(args.status, args.summary, args.blocker, args.question, args.next_actions, args.by,
-                    args.session_id, args.workstream_id, args.scope)
-        print("Passagem de trabalho registrada")
+    elif args.command in {"handoff", "handoff-show"}:
+        try:
+            if args.command == "handoff-show":
+                print(json.dumps(omm.get_handoff(args.scope, args.workstream_id,
+                                                args.observed_revision, args.observed_repository),
+                                 ensure_ascii=False, indent=2))
+            else:
+                omm.handoff(args.status, args.summary, args.blocker, args.question, args.next_actions, args.by,
+                            args.session_id, args.workstream_id, args.scope, args.expected_sha256,
+                            args.repository, args.branch, args.git_revision)
+                print("Passagem de trabalho registrada com SHA." if args.expected_sha256
+                      else "Passagem registrada sem verificação de versão; use handoff-show e --expected-sha256.")
+        except (OMMError, OSError, ValueError) as exc:
+            print(json.dumps(error_report(exc, args.command), ensure_ascii=False), file=sys.stderr)
+            return 2
     elif args.command == "rebuild":
         record_count = omm.rebuild()
         print(f"Busca recriada: {record_count} anotações canônicas e "
@@ -278,11 +357,21 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(report["message"])
     elif args.command == "workstream":
-        if args.workstream_command == "create":
-            print(json.dumps(omm.create_workstream(args.id, args.title, args.by, args.status), ensure_ascii=False))
-        else:
-            for item in omm.workstreams():
-                print(json.dumps(item, ensure_ascii=False))
+        try:
+            if args.workstream_command == "create":
+                result = omm.create_workstream(args.id, args.title, args.by, args.status)
+            elif args.workstream_command == "show":
+                result = omm.get_workstream(args.id)
+            elif args.workstream_command == "update":
+                result = omm.update_workstream(args.id, args.expected_sha256, args.by, args.title, args.status)
+            else:
+                for item in omm.workstreams():
+                    print(json.dumps(item, ensure_ascii=False))
+                return 0
+            print(json.dumps(result, ensure_ascii=False))
+        except (OMMError, OSError, ValueError) as exc:
+            print(json.dumps(error_report(exc, "workstream-" + args.workstream_command), ensure_ascii=False), file=sys.stderr)
+            return 2
     elif args.command == "history":
         if args.history_command == "stage":
             staged = stage_history(omm.root, args.file.read_bytes())

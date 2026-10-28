@@ -6,8 +6,11 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 import re
 import tempfile
+
+from .errors import OMMError
 
 
 MAX_CHUNK_CHARS = 2800
@@ -44,6 +47,7 @@ class SourceHit:
 def import_source_markdown(root: Path, scope: str, relative_path: str,
                            content: str) -> dict[str, object]:
     """Store one Markdown source below the canonical data root without overwriting."""
+    _editable_source(relative_path)
     if not isinstance(scope, str) or not _SCOPE.fullmatch(scope):
         raise ValueError("Escopo inválido. Use um nome simples, como pkhex-linux.")
     if not isinstance(relative_path, str) or not relative_path or "\\" in relative_path:
@@ -149,7 +153,9 @@ def read_source_markdown(root: Path, source: str, start_line: int,
     if start_line < 1 or end_line < start_line or end_line - start_line >= 80:
         raise ValueError("Escolha um trecho de até 80 linhas.")
     target = _managed_source_path(root, source)
-    raw = target.read_bytes()
+    with target.open("rb") as stream:
+        raw = stream.read()
+        modified_at = os.fstat(stream.fileno()).st_mtime
     if len(raw) > MAX_SOURCE_FILE_BYTES:
         raise ValueError("A fonte é grande demais para abrir por esta ferramenta.")
     try:
@@ -166,19 +172,28 @@ def read_source_markdown(root: Path, source: str, start_line: int,
         "content": selected[:8000],
         "truncated": len(selected) > 8000,
         "sha256": hashlib.sha256(raw).hexdigest(),
+        "origin": "canonical",
+        "file_modified_at": datetime.fromtimestamp(modified_at, timezone.utc).isoformat(),
+        "currentness": "not_verified",
     }
+
+
+def _editable_source(source: str) -> None:
+    if isinstance(source, str) and source.endswith(".image-evidence.md"):
+        raise ValueError("Descrições de imagens são preservadas com o original. Use o fluxo de evidências para importar ou remover; não edite como texto comum.")
 
 
 def replace_source_markdown(root: Path, source: str, content: str,
                             expected_sha256: str) -> dict[str, object]:
     """Replace one source only if its current content still matches the supplied hash."""
+    _editable_source(source)
     target = _managed_source_path(root, source)
     if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256 or ""):
         raise ValueError("Informe o sha256 atual da fonte para confirmar a edição.")
     current = target.read_bytes()
     current_digest = hashlib.sha256(current).hexdigest()
     if current_digest != expected_sha256.lower():
-        raise ValueError("A fonte mudou desde a leitura. Leia o sha256 atual antes de tentar de novo.")
+        raise OMMError("VERSION_CONFLICT", "A fonte mudou; nada foi alterado por esta chamada.", "Leia read_source novamente e mescle a edição usando o novo SHA.")
     if not isinstance(content, str) or not content.strip():
         raise ValueError("O novo conteúdo Markdown está vazio.")
     try:
@@ -199,7 +214,7 @@ def replace_source_markdown(root: Path, source: str, content: str,
         os.chmod(temporary_name, target.stat().st_mode & 0o777)
         # Recheck immediately before replacement to prevent silent lost updates.
         if hashlib.sha256(target.read_bytes()).hexdigest() != current_digest:
-            raise ValueError("A fonte mudou durante a edição. Nenhuma alteração foi aplicada.")
+            raise OMMError("VERSION_CONFLICT", "A fonte mudou; nada foi alterado por esta chamada.", "Leia read_source novamente e mescle a edição usando o novo SHA.")
         os.replace(temporary_name, target)
     finally:
         if temporary_name and os.path.exists(temporary_name):
@@ -211,6 +226,7 @@ def replace_source_markdown(root: Path, source: str, content: str,
 def patch_source_markdown(root: Path, source: str, edits: list[dict],
                           expected_sha256: str) -> dict[str, object]:
     """Apply bounded literal edits against one original snapshot, never sequentially."""
+    _editable_source(source)
     from .redaction import find_credentials
 
     target = _managed_source_path(root, source)
@@ -220,7 +236,7 @@ def patch_source_markdown(root: Path, source: str, edits: list[dict],
     if len(raw) > MAX_SOURCE_FILE_BYTES:
         raise ValueError("A fonte excede o limite de 20 MiB.")
     if hashlib.sha256(raw).hexdigest() != expected_sha256.lower():
-        raise ValueError("A fonte mudou desde a leitura. Nenhuma edição foi aplicada.")
+        raise OMMError("VERSION_CONFLICT", "A fonte mudou; nada foi alterado por esta chamada.", "Leia read_source novamente e mescle a edição usando o novo SHA.")
     if not isinstance(edits, list) or not 1 <= len(edits) <= 50:
         raise ValueError("Informe de 1 a 50 edições pequenas.")
     text = raw.decode("utf-8")
@@ -255,6 +271,7 @@ def redact_source_spans_markdown(root: Path, source: str,
                                  spans: list[dict[str, int]],
                                  expected_sha256: str) -> dict[str, object]:
     """Redact selected 1-based character spans without returning source text."""
+    _editable_source(source)
     target = _managed_source_path(root, source)
     if not isinstance(expected_sha256, str) or not re.fullmatch(
             r"[a-fA-F0-9]{64}", expected_sha256):
@@ -265,7 +282,7 @@ def redact_source_spans_markdown(root: Path, source: str,
     current = target.read_bytes()
     current_digest = hashlib.sha256(current).hexdigest()
     if current_digest != expected_sha256.lower():
-        raise ValueError("A fonte mudou desde a leitura. Leia o sha256 atual antes de tentar de novo.")
+        raise OMMError("VERSION_CONFLICT", "A fonte mudou; nada foi alterado por esta chamada.", "Leia read_source novamente e mescle a edição usando o novo SHA.")
     if len(current) > MAX_SOURCE_FILE_BYTES:
         raise ValueError("A fonte excede o limite de 20 MiB.")
     try:
@@ -339,7 +356,7 @@ def redact_source_spans_markdown(root: Path, source: str,
             os.fsync(temporary.fileno())
         os.chmod(temporary_name, target.stat().st_mode & 0o777)
         if hashlib.sha256(target.read_bytes()).hexdigest() != current_digest:
-            raise ValueError("A fonte mudou durante a redação. Nenhuma alteração foi aplicada.")
+            raise OMMError("VERSION_CONFLICT", "A fonte mudou; nada foi alterado por esta chamada.", "Leia read_source novamente e mescle a edição usando o novo SHA.")
         os.replace(temporary_name, target)
     finally:
         if temporary_name and os.path.exists(temporary_name):
@@ -353,13 +370,14 @@ def redact_source_spans_markdown(root: Path, source: str,
 def delete_source_markdown(root: Path, source: str,
                            expected_sha256: str) -> dict[str, object]:
     """Delete one source only after a caller confirms its current SHA-256."""
+    _editable_source(source)
     target = _managed_source_path(root, source)
     if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256 or ""):
         raise ValueError("Informe o sha256 atual da fonte para confirmar a remoção.")
     current = target.read_bytes()
     digest = hashlib.sha256(current).hexdigest()
     if digest != expected_sha256.lower():
-        raise ValueError("A fonte mudou desde a leitura. Leia o sha256 atual antes de tentar de novo.")
+        raise OMMError("VERSION_CONFLICT", "A fonte mudou; nada foi alterado por esta chamada.", "Leia read_source novamente e mescle a edição usando o novo SHA.")
     target.unlink()
     return {"status": "deleted", "source": source,
             "bytes": len(current), "sha256": digest}
@@ -378,6 +396,11 @@ def read_source_chunks(root: Path, max_chars: int = MAX_CHUNK_CHARS) -> list[Sou
         parts = path.relative_to(source_root).parts
         scope = parts[0] if len(parts) > 1 else "global"
         text = path.read_text(encoding="utf-8")
+        if path.name.endswith(".image-evidence.md"):
+            from .image_evidence import MARKER
+            body, marker, _ = text.rpartition(MARKER)
+            if marker:
+                text = body  # Search the human description once, not duplicated JSON metadata.
         headings: list[tuple[int, str]] = []
         current: list[tuple[int, str]] = []
         current_chars = 0

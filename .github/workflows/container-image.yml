@@ -20,6 +20,12 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v6
 
+      - name: Validate application and MCP tools before publishing
+        run: |
+          python3 -m venv /tmp/omm-ci
+          /tmp/omm-ci/bin/pip install '.[mcp,backup]'
+          /tmp/omm-ci/bin/python -m unittest discover -s tests -v
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
         with:

@@ -13,6 +13,8 @@ from time import monotonic
 import uuid
 
 from .adapters import GenericMarkdownAdapter
+from .continuity import checkpoint_metadata, validate_repository, validate_revision
+from .errors import OMMError
 from .models import MemoryRecord
 from .retrieval import Retriever, SQLiteFTSRetriever
 from .redaction import find_credentials
@@ -24,6 +26,7 @@ from .scope_merge import ScopeMergeError, apply_scope_merge, build_scope_merge_p
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
 from .locking import data_lock
+from . import image_evidence
 
 
 MAX_SEARCH_RESULTS = 100
@@ -159,7 +162,7 @@ class OMM:
         with self.operation_lock():
             self._ensure_index_current(force=True)
             if record.workstream_id and not any(item["id"] == record.workstream_id for item in self.store.workstreams()):
-                raise ValueError(f"unknown workstream: {record.workstream_id}; create it first")
+                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
             self.store.append(record)
             self.retriever.add(record)
             self.retriever.set_indexed_fingerprint(self._canonical_fingerprint())
@@ -326,7 +329,7 @@ class OMM:
         if limit == 0:
             return []
         if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
-            raise ValueError(f"unknown workstream: {workstream_id}; create it first")
+            raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
         self._ensure_index_current()
         canonical = self._records_by_id()
         search_limit = limit if workstream_id is None else max(limit * 10, 100)
@@ -380,6 +383,30 @@ class OMM:
         with self.operation_lock():
             self._ensure_index_current()
             return self.retriever.search_sources(query, max(0, min(int(limit), MAX_SOURCE_RESULTS)), scopes)
+
+    def import_image(self, scope: str, raw: bytes, metadata: dict) -> dict:
+        with self.operation_lock():
+            result = image_evidence.import_image(self.root, scope, raw, metadata)
+            self._index_schema_valid = False
+            return result
+
+    def list_images(self, scope: str, offset: int = 0, limit: int = 20) -> dict:
+        with self.operation_lock():
+            return image_evidence.list_images(self.root, scope, offset, limit)
+
+    def describe_image(self, path: str) -> dict:
+        with self.operation_lock():
+            return image_evidence.describe_image(self.root, path)
+
+    def read_image(self, path: str, variant: str = "preview") -> tuple[bytes, str, dict]:
+        with self.operation_lock():
+            return image_evidence.read_image(self.root, path, variant)
+
+    def delete_image(self, path: str, expected_sha256: str) -> dict:
+        with self.operation_lock():
+            result = image_evidence.delete_image(self.root, path, expected_sha256)
+            self._index_schema_valid = False
+            return result
 
     def import_source(self, scope: str, relative_path: str, content: str) -> dict[str, object]:
         """Import a Markdown source into canonical data and refresh retrieval lazily."""
@@ -458,14 +485,16 @@ class OMM:
         with self.operation_lock():
             return save_role_file(self.root, name, content, expected_sha256)
 
-    def rebuild_semantic(self) -> int:
+    def rebuild_semantic(self, scopes: list[str] | None = None) -> int:
         """Create the optional vector index from canonical records and source files."""
         if self.semantic is None:
             raise SemanticSearchError("Busca semântica desligada. Configure OMM_SEMANTIC_ENABLED=true e os dados do serviço de embeddings.")
         with self.operation_lock():
             self._ensure_index_current()
             fingerprint = self._canonical_fingerprint()
-            return self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root), fingerprint)
+            if scopes is not None and (not scopes or any(not isinstance(scope, str) or not scope.strip() for scope in scopes)):
+                raise ValueError("Informe ao menos um escopo não vazio, ou omita --scope para reconstruir tudo.")
+            return self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root), fingerprint, scopes=scopes)
 
     def _semantic_stale_scopes(self, fingerprint: str, scopes: list[str] | None) -> list[str] | None:
         assert self.semantic is not None
@@ -619,32 +648,69 @@ class OMM:
         with self.operation_lock():
             return self.store.workstreams()
 
-    def get_handoff(self, scope: str = "default", workstream_id: str | None = None) -> dict:
+    def list_workstreams(self, status: str | None = None, offset: int = 0, limit: int = 20) -> dict:
+        from .store import WORKSTREAM_STATUSES
+        if status is not None and status not in WORKSTREAM_STATUSES:
+            raise ValueError("Use active, paused, completed ou archived.")
+        if (isinstance(offset, bool) or not isinstance(offset, int) or offset < 0
+                or isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100):
+            raise ValueError("Use offset a partir de zero e limit entre 1 e 100.")
+        with self.operation_lock():
+            items = sorted((item for item in self.store.workstreams()
+                            if status is None or item["status"] == status), key=lambda item: item["id"])
+            selected = items[offset:offset + limit]
+            return {"items": [self.store.workstream_version(item) for item in selected],
+                    "total": len(items), "next_offset": offset + limit if offset + limit < len(items) else None}
+
+    def get_workstream(self, workstream_id: str) -> dict:
+        with self.operation_lock():
+            return self.store.get_workstream(workstream_id)
+
+    def update_workstream(self, workstream_id: str, expected_sha256: str, actor: str = "human",
+                          title: str | None = None, status: str | None = None) -> dict:
+        with self.operation_lock():
+            return self.store.update_workstream(workstream_id, expected_sha256, actor, title, status)
+
+    def get_handoff(self, scope: str = "default", workstream_id: str | None = None,
+                    observed_revision: str | None = None, observed_repository: str | None = None) -> dict:
         """Expose the complete current state and a stable digest for guarded updates."""
         with self.operation_lock():
             if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
-                raise ValueError(f"unknown workstream: {workstream_id}; create it first")
+                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
             state = self.store.read_state(workstream_id, scope)
             encoded = json.dumps({"scope": scope, "workstream_id": workstream_id, "state": state},
                                  ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            return {"scope": scope, "workstream_id": workstream_id, "state": state,
-                    "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest()}
+            result = {"scope": scope, "workstream_id": workstream_id, "state": state,
+                      "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest()}
+            result.update(checkpoint_metadata(state, observed_revision, observed_repository))
+            if state.get("workstream_id") != workstream_id and state.get("updated_at"):
+                result["selection_warning"] = "O estado selecionado pertence a outra frente; confira a seleção antes de gravar."
+            return result
 
-    def handoff(self, status: str, summary: str, blockers: list[str], questions: list[str], next_actions: list[str], actor: str, session_id: str | None = None, workstream_id: str | None = None, scope: str = "default", expected_sha256: str | None = None) -> None:
+    def handoff(self, status: str, summary: str, blockers: list[str], questions: list[str], next_actions: list[str], actor: str, session_id: str | None = None, workstream_id: str | None = None, scope: str = "default", expected_sha256: str | None = None, repository: str | None = None, branch: str | None = None, git_revision: str | None = None) -> None:
+        validate_repository(repository)
+        validate_revision(git_revision)
+        if branch is not None and (not isinstance(branch, str) or len(branch) > 200
+                                   or any(ord(c) < 32 for c in branch) or find_credentials(branch)):
+            raise OMMError("INVALID_ARGUMENT", "O nome da branch é inválido.", "Informe apenas o nome da branch, sem comandos ou credenciais.")
         with self.operation_lock():
             if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
-                raise ValueError(f"unknown workstream: {workstream_id}; create it first")
+                raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
             if expected_sha256 is not None:
                 if not isinstance(expected_sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
-                    raise ValueError("Informe o sha256 atual devolvido por get_handoff.")
+                    raise OMMError("INVALID_ARGUMENT", "O SHA esperado é inválido.", "Use o sha256 completo retornado por get_handoff.")
                 if self.get_handoff(scope, workstream_id)["sha256"] != expected_sha256.lower():
-                    raise ValueError("O handoff mudou desde a leitura. Leia get_handoff e mescle o estado antes de tentar novamente.")
+                    raise OMMError("VERSION_CONFLICT", "O handoff mudou desde a leitura; nada foi gravado.",
+                                   "Leia get_handoff novamente, mescle o estado e use o novo SHA. Não retire a proteção.")
             state = {
                 "schema_version": 1, "status": status, "summary": summary,
                 "blockers": blockers, "open_questions": questions, "next_actions": next_actions, "scope": scope,
                 "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                 "updated_by": actor, "session_id": session_id, "workstream_id": workstream_id,
             }
+            if repository is not None or branch is not None or git_revision is not None:
+                state.update(repository=repository, branch=branch,
+                             git_revision=git_revision.lower() if git_revision else None)
             self.store.append_handoff(state)
             if workstream_id is None and scope in {"default", "global"}:
                 self.store.write_state(state)
