@@ -83,7 +83,7 @@ Esta aplicação usa a seguinte organização. Outros projetos que usam a OMM po
 
 A instalação básica está em "Comece em poucos minutos". Na raiz do repositório, `python3 -m omm --help` lista os comandos existentes. Para executar a suíte quando a tarefa exigir validação, use `python3 -m unittest discover -s tests -v`; documentar a organização não exige executar testes novos.
 
-As ferramentas de desenvolvimento podem estar na CLI e nos comandos de build: não é necessário criar uma pasta `tools/` vazia. Regras e skills compartilhadas ficam nos dados canônicos da OMM; configurações específicas de um assistente são opcionais. Preserve os resultados necessários para reproduzir o trabalho antes de remover saídas temporárias. Nunca trate a pasta de dados dos usuários como resíduo de compilação.
+As ferramentas de desenvolvimento podem estar na CLI e nos comandos de build: não é necessário criar uma pasta `tools/` vazia. As regras e skills configuradas para os assistentes ficam na pasta de dados do serviço, separada do código; integrações específicas de um assistente são opcionais. Preserve os resultados necessários para reproduzir o trabalho antes de remover saídas temporárias. Nunca trate a pasta de dados dos usuários como resíduo de compilação.
 
 ## Palavras que você pode encontrar
 
