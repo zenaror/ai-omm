@@ -171,6 +171,24 @@ class UsageRecorder:
                 result["rows"].append({"tool": tool, "scope": project,
                     "calls": calls, "failures": failures, "input_chars": inputs, "output_chars": outputs,
                     "mean_ms": round(total_ms / calls, 2), "max_ms": round(max_ms, 2)})
+            # Include omitted groups in project totals and latency ranking.
+            projects = {}
+            for row in rows:
+                project = projects.setdefault(row[1], {"scope": row[1], "calls": 0, "failures": 0,
+                    "input_chars": 0, "output_chars": 0, "total_ms": 0})
+                for key, value in zip(("calls", "failures", "input_chars", "output_chars", "total_ms"), row[2:7]):
+                    project[key] += value
+            result["projects"] = sorted(projects.values(), key=lambda p: p["input_chars"] + p["output_chars"], reverse=True)[:50]
+            result["projects_truncated"] = len(projects) > 50
+            result["slowest_rows"] = [{"tool": row[0], "scope": row[1], "calls": row[2],
+                "total_ms": round(row[6], 2), "mean_ms": round(row[6] / row[2], 2), "max_ms": round(row[7], 2)}
+                for row in sorted(rows, key=lambda r: r[6], reverse=True)[:10]]
+            daily_sql = "SELECT day,SUM(calls),SUM(failures),SUM(input_chars),SUM(output_chars),SUM(total_ms) FROM usage_daily WHERE day>=?"
+            if scope is not None:
+                daily_sql += " AND scope=?"
+            result["daily"] = [{"day": day, "calls": calls, "failures": failures,
+                "input_chars": inputs, "output_chars": outputs, "total_ms": round(elapsed, 2)}
+                for day, calls, failures, inputs, outputs, elapsed in db.execute(daily_sql + " GROUP BY day ORDER BY day", params)]
             error_sql = "SELECT tool,scope,error_code,SUM(failures) FROM usage_errors_daily WHERE day>=?"
             if scope is not None:
                 error_sql += " AND scope=?"

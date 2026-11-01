@@ -7,6 +7,10 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Adicionado
 
+- Registro de reconstruções lentas da busca nos logs do serviço, sem conteúdo privado.
+- Relatório de uso com totais por projeto, evolução diária e operações que mais
+  acumularam tempo, para orientar melhorias sem guardar o conteúdo das conversas.
+
 - Imagens como evidência: envio pelo painel ou em lote, descrições pesquisáveis,
   prévias para os assistentes e originais preservados no backup. Atualize também
   o serviço de backup antes de enviar imagens.

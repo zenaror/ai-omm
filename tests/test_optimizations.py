@@ -116,6 +116,30 @@ class OptimizationTests(unittest.TestCase):
         self.assertEqual(duplicate.exception.code, "ALREADY_EXISTS")
         self.assertEqual(before, self.omm.store.workstreams_path.read_bytes())
 
+    def test_slow_rebuild_logs_counts_without_canonical_text(self):
+        with patch("omm.service.perf_counter", side_effect=[0, 2]):
+            with self.assertLogs("omm.service", level="WARNING") as logs:
+                self.omm.rebuild()
+        self.assertIn("omm_index_rebuild seconds=2.000 records=0 chunks=0", logs.output[0])
+        self.assertNotIn(str(self.root), logs.output[0])
+
+    def test_usage_summary_includes_groups_beyond_top_50_and_filters_daily(self):
+        usage = UsageRecorder(self.root)
+        for index in range(55):
+            usage._record(f"tool-{index}", "demo", 10, 20, 100, False)
+        usage._record("slow", "other", 1, 1, 10000, True, "TIMEOUT")
+        report = usage.report()
+        self.assertTrue(report["truncated"])
+        demo = next(p for p in report["projects"] if p["scope"] == "demo")
+        self.assertEqual(demo["calls"], 55)
+        self.assertEqual(demo["output_chars"], 1100)
+        self.assertEqual(report["slowest_rows"][0]["tool"], "slow")
+        self.assertEqual(sum(d["calls"] for d in report["daily"]), 56)
+        scoped = usage.report(scope="demo")
+        self.assertEqual(len(scoped["projects"]), 1)
+        self.assertEqual(sum(d["calls"] for d in scoped["daily"]), 55)
+        self.assertEqual(sum(d["failures"] for d in scoped["daily"]), 0)
+
     def test_usage_migrates_old_counters_and_classifies_without_error_text(self):
         usage = UsageRecorder(self.root)
         usage._record("legacy", "demo", 10, 0, 2, True)

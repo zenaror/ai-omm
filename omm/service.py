@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 from contextlib import contextmanager
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
 import sqlite3
 from threading import Lock, RLock, Thread
-from time import monotonic
+from time import monotonic, perf_counter
 import uuid
 
 from .adapters import GenericMarkdownAdapter
@@ -109,9 +110,16 @@ class OMM:
         return digest.hexdigest()
 
     def _rebuild_index(self, fingerprint: str | None = None) -> int:
+        started = perf_counter()
         records = list(self.store.records())
         signature = fingerprint or self._canonical_fingerprint()
-        self.retriever.rebuild(records, read_source_chunks(self.root), signature)
+        chunks = read_source_chunks(self.root)
+        self.retriever.rebuild(records, chunks, signature)
+        elapsed = perf_counter() - started
+        if elapsed >= 1:
+            logging.getLogger(__name__).warning(
+                "omm_index_rebuild seconds=%.3f records=%d chunks=%d",
+                elapsed, len(records), len(chunks))
         self._last_index_check = monotonic()
         self._index_file_signature = self._current_index_file_signature()
         self._index_schema_valid = True

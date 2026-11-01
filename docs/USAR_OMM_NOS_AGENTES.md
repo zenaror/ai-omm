@@ -134,3 +134,30 @@ Quando houver risco de esgotamento:
 6. Avise a pessoa usuária: o trabalho aguarda capacidade e pode ser retomado de onde foi registrado. Não marque pendências como concluídas nem troque provedor, resgate reset ou compre créditos automaticamente.
 
 A prioridade é preservar a continuidade, não consumir a última capacidade para encerrar mais uma tarefa. Sem acesso confiável ao limite, mantenha checkpoints incrementais e declare a limitação. Não afirme que gravou, publicou ou fez backup sem evidência. As regras de autorização, observação em hardware e revisão independente continuam valendo.
+
+### Revisão periódica do uso
+
+O relatório também mostra totais por projeto (`projects`), evolução por dia
+(`daily`) e os dez grupos que mais acumularam tempo (`slowest_rows`). Esses
+resumos incluem os grupos omitidos da lista principal de 50 itens. A lista de
+projetos também tem limite de 50 e avisa quando houver corte.
+Compare períodos equivalentes e filtre o projeto antes de ampliar os logs.
+
+- Reutilize um handoff já lido enquanto ele continuar vigente. Grave um checkpoint
+  quando houver avanço útil, pausa, transferência ou encerramento.
+- Guarde detalhes estáveis em fontes ou memórias e cite seus caminhos no handoff.
+- Falhas de argumento pedem correção da chamada, não repetição idêntica.
+- Uma busca lenta após publicação pode incluir reconstrução do índice. A média
+  atual não separa espera por trava, reconstrução e consulta: investigue essas
+  etapas antes de atribuir a demora ao modelo ou ao servidor de embeddings.
+- Preserve cobertura dos testes e revisão independente ao agrupar tarefas.
+
+A coleta atual já fica ativa por padrão. Não é necessário guardar prompts,
+respostas completas ou credenciais para acompanhar essas tendências.
+
+Reconstruções da busca lexical que levam pelo menos um segundo também geram
+uma linha `omm_index_rebuild` no log do serviço, com duração e contagens de
+anotações e trechos. A linha não contém documentos, perguntas nem caminhos.
+No Portainer, abra **Containers → serviço da OMM → Logs** e procure esse nome.
+Esse tempo cobre leitura e reconstrução, sem medir a espera pela trava anterior.
+Use rotação de logs no Docker para limitar o espaço ocupado.
