@@ -7,6 +7,10 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Adicionado
 
+- Diagnóstico separa espera por acesso aos dados, atualização do índice e consulta.
+- Avaliação da busca com perguntas dos projetos e respostas esperadas, sem expor
+  documentos no relatório.
+
 - Registro de reconstruções lentas da busca nos logs do serviço, sem conteúdo privado.
 - Relatório de uso com totais por projeto, evolução diária e operações que mais
   acumularam tempo, para orientar melhorias sem guardar o conteúdo das conversas.
@@ -29,6 +33,9 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
   A conferência agora preserva a regra de mantê-las fora dessa busca.
 
 ### Alterado
+
+- Instruções iniciais MCP mais curtas. O guia completo continua disponível na
+  ferramenta `usage_guide`, sem mudar argumentos ou validações das ferramentas.
 
 - Frentes aceitam o estado pausado. Use a mesma versão atualizada da OMM em todos
   os processos que acessam esses dados; versões antigas não consolidam suas revisões.

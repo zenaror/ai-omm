@@ -60,7 +60,7 @@ Siga o guia [Como usar a OMM nos agentes](docs/USAR_OMM_NOS_AGENTES.md). Para in
 
 Por padrão, a OMM usa busca textual local. A busca semântica é opcional: em vez de exigir as mesmas palavras, ela tenta encontrar o mesmo assunto. Na stack Docker, o perfil opcional `semantic` inicia o Ollama e baixa um modelo pequeno para essa tarefa. Veja [como ativar](docs/USAR_MCP.md#busca-semântica-procurar-pelo-assunto). Agentes podem sugerir memórias para aprovação no painel.
 
-Para economizar contexto, agentes podem corrigir trechos com `patch_source`, sem reenviar documentos inteiros. `get_handoff` e o hash esperado em `handoff` protegem a passagem de trabalho contra outra sessão. `usage_report` mostra contagens e tamanhos das chamadas MCP sem guardar seu texto; não mede tokens faturados. Veja [ferramentas e exemplos](docs/FERRAMENTAS_MCP.md) e [as orientações de uso](docs/USAR_OMM_NOS_AGENTES.md#economia-de-contexto-sem-perder-continuidade).
+Para economizar contexto, agentes podem corrigir trechos com `patch_source`, sem reenviar documentos inteiros. `get_handoff` e o hash esperado em `handoff` protegem a passagem de trabalho contra outra sessão. [O guia de avaliação](docs/AVALIAR_MELHORIAS.md) explica como comparar recuperação, texto enviado e consumo real informado pelo provedor. `usage_report` mostra contagens e tamanhos das chamadas MCP sem guardar seu texto; não mede tokens faturados. Veja [ferramentas e exemplos](docs/FERRAMENTAS_MCP.md) e [as orientações de uso](docs/USAR_OMM_NOS_AGENTES.md#economia-de-contexto-sem-perder-continuidade).
 
 Projetos sem mapa próprio de agentes recebem as regras globais na mesma consulta.
 Frentes paralelas podem ser consultadas e atualizadas pelo MCP, com proteção por

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack, nullcontext
 import hashlib
 import json
 import logging
@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
-from threading import Lock, RLock, Thread
+from threading import Lock, RLock, Thread, local
 from time import monotonic, perf_counter
 import uuid
 
@@ -27,6 +27,7 @@ from .scope_merge import ScopeMergeError, apply_scope_merge, build_scope_merge_p
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
 from .locking import data_lock
+from .timing import PhaseTimings, timed_phase
 from . import image_evidence
 
 
@@ -46,6 +47,8 @@ class OMM:
         self.retriever: Retriever = retriever or SQLiteFTSRetriever(self.root / ".omm" / "index.sqlite3")
         self.adapter = GenericMarkdownAdapter()
         self._lock = RLock()
+        self.timings = PhaseTimings()
+        self._timing_local = local()
         self._record_cache_signature: tuple[int, int, int] | None = None
         self._record_cache: dict[str, MemoryRecord] = {}
         self._last_index_check = 0.0
@@ -84,8 +87,20 @@ class OMM:
 
     @contextmanager
     def operation_lock(self):
-        with self._lock, data_lock(self.root):
-            yield
+        outer = not getattr(self._timing_local, "depth", 0)
+        with ExitStack() as stack:
+            with self.timings.measure("lock_wait") if outer else nullcontext():
+                stack.enter_context(self._lock)
+                stack.enter_context(data_lock(self.root))
+            self._timing_local.depth = getattr(self._timing_local, "depth", 0) + 1
+            try:
+                with self.timings.measure("operation") if outer else nullcontext():
+                    yield
+            finally:
+                self._timing_local.depth -= 1
+
+    def phase_report(self):
+        return self.timings.report()
 
     def init(self) -> None:
         with self.operation_lock():
@@ -109,6 +124,7 @@ class OMM:
             digest.update(f"\0{stat.st_size}\0{stat.st_mtime_ns}\0{stat.st_ctime_ns}\n".encode())
         return digest.hexdigest()
 
+    @timed_phase("index_rebuild")
     def _rebuild_index(self, fingerprint: str | None = None) -> int:
         started = perf_counter()
         records = list(self.store.records())
@@ -125,6 +141,7 @@ class OMM:
         self._index_schema_valid = True
         return len(records)
 
+    @timed_phase("index_check")
     def _ensure_index_current(self, force: bool = False) -> None:
         now = monotonic()
         file_signature = self._current_index_file_signature()
@@ -343,7 +360,8 @@ class OMM:
         search_limit = limit if workstream_id is None else max(limit * 10, 100)
         selected = []
         while True:
-            hits = self.retriever.search(query, search_limit, scopes)
+            with self.timings.measure("lexical_memory_query"):
+                hits = self.retriever.search(query, search_limit, scopes)
             selected = [canonical[hit.id] for hit in hits if hit.id in canonical and
                         (workstream_id is None or canonical[hit.id].workstream_id in (None, workstream_id))]
             if len(selected) >= limit or len(hits) < search_limit or search_limit >= 5000:
@@ -390,7 +408,8 @@ class OMM:
                        scopes: list[str] | None = None) -> list[SourceHit]:
         with self.operation_lock():
             self._ensure_index_current()
-            return self.retriever.search_sources(query, max(0, min(int(limit), MAX_SOURCE_RESULTS)), scopes)
+            with self.timings.measure("lexical_source_query"):
+                return self.retriever.search_sources(query, max(0, min(int(limit), MAX_SOURCE_RESULTS)), scopes)
 
     def import_image(self, scope: str, raw: bytes, metadata: dict) -> dict:
         with self.operation_lock():

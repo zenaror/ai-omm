@@ -28,7 +28,24 @@ As seções seguintes explicam as ferramentas MCP da aplicação. As ferramentas
 
 ## Medir o uso
 
+### `usage_guide`
+
+**Para que serve:** abre as orientações completas de uso das ferramentas quando
+uma operação for desconhecida. O servidor passa a enviar apenas um resumo na
+conexão inicial. Os nomes e argumentos das outras ferramentas continuam iguais.
+
+**Exemplo:** `usage_guide()`.
+
+**Quando usar:** antes de uma operação nova ou ao esclarecer uma dúvida. Reaproveite
+o guia na sessão, sem abri-lo de novo a cada consulta.
+
 ### `usage_report`
+
+Inclui resumo por projeto, por dia e operações com maior tempo acumulado.
+`runtime_phases` separa espera, verificação/reconstrução do índice e consulta;
+conta desde o início do processo e inclui todos os projetos, mesmo quando o
+relatório diário estiver filtrado. Etapas sobrepostas não devem ser somadas.
+Veja [como avaliar melhorias](AVALIAR_MELHORIAS.md).
 
 Mostra quanto texto passa pelas ferramentas MCP e quantas chamadas foram feitas.
 

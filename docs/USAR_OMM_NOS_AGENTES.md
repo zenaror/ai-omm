@@ -161,3 +161,22 @@ anotações e trechos. A linha não contém documentos, perguntas nem caminhos.
 No Portainer, abra **Containers → serviço da OMM → Logs** e procure esse nome.
 Esse tempo cobre leitura e reconstrução, sem medir a espera pela trava anterior.
 Use rotação de logs no Docker para limitar o espaço ocupado.
+
+### Diagnóstico e comparação das melhorias
+
+`usage_report` inclui `runtime_phases`: contadores da instância atual, somando
+os projetos. `lock_wait` mede espera pelo acesso aos dados; `operation` mede o
+trabalho depois de obter acesso; `index_check` inclui eventual `index_rebuild`.
+`lexical_memory_query` e `lexical_source_query` medem a consulta SQLite.
+Essas etapas podem se sobrepor: não some todos os valores. Reiniciar o serviço
+zera as etapas, mas mantém os contadores diários no volume `.omm`.
+Mesmo quando filtrar um projeto, `runtime_phases` continua global à instância.
+Não há textos de consultas nem identificadores de sessão nesses contadores.
+`OMM_USAGE_ENABLED=false` também desliga a coleta dessas etapas.
+
+O servidor envia instruções iniciais curtas. O assistente pode abrir
+`usage_guide` ao precisar das regras completas de uma operação desconhecida.
+Não é necessário carregar esse guia em toda chamada. As verificações de SHA,
+permissões e argumentos continuam sendo feitas no servidor.
+
+Para avaliar a busca e comparar uso de tokens, siga [o guia de avaliação](AVALIAR_MELHORIAS.md).
