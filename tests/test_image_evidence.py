@@ -9,6 +9,9 @@ import os
 from pathlib import Path
 import random
 import subprocess
+import socket
+import sys
+import time
 import tempfile
 from threading import Thread
 import unittest
@@ -20,7 +23,8 @@ from omm.backup_worker import backup_once, _validate_sources, BackupError
 from omm.cli import main
 from omm.errors import OMMError
 from omm.image_evidence import CARD_SUFFIX, MAX_IMAGE_BYTES, inspect_image
-from omm.image_transfer import MAX_UPLOAD_BYTES, multipart_upload, parse_upload, upload_to_server
+from omm.image_transfer import (MAX_UPLOAD_BYTES, decode_mcp_image, multipart_upload,
+                               parse_upload, upload_to_server, upload_to_mcp)
 from omm.restore import restore_from_git
 from omm.service import OMM
 from omm.source_documents import read_source_markdown
@@ -277,6 +281,86 @@ class ImageEvidenceTests(unittest.TestCase):
             self.assertGreater(UsageRecorder._size(small), 0)
             self.assertEqual(UsageRecorder._size(small), UsageRecorder._size(large))
         asyncio.run(run())
+
+    def test_mcp_upload_validates_hash_encoding_and_size(self):
+        raw = image_bytes()
+        encoded = base64.b64encode(raw).decode()
+        digest = hashlib.sha256(raw).hexdigest()
+        self.assertEqual(decode_mcp_image(encoded, digest), raw)
+        for data, sha in ((encoded, "0" * 64), ("data:image/png;base64," + encoded, digest),
+                          ("!!!!", digest), ("", digest), (encoded, "../path"),
+                          ("A" * (4 * ((MAX_IMAGE_BYTES + 2) // 3) + 1), digest)):
+            with self.subTest(length=len(data)), self.assertRaises(ValueError):
+                decode_mcp_image(data, sha)
+
+    def test_authenticated_mcp_upload_without_panel_roundtrip(self):
+        try:
+            from omm.mcp_server import build_server
+            import mcp
+        except ImportError:
+            self.skipTest("Install optional MCP extra")
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        token = "fixture-image-upload-token-32-characters"
+        env = {**os.environ, "OMM_MCP_TOKEN": token, "OMM_WEB_ENABLED": "false",
+               "OMM_GIT_BACKUP_RESTORE": "false"}
+        process = subprocess.Popen([sys.executable, "-m", "omm.mcp_server", "--root", str(self.root),
+                                    "--transport", "streamable-http", "--port", str(port)],
+                                   env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            deadline = time.monotonic() + 15
+            while True:
+                try:
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
+                    connection.request("GET", "/mcp")
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 401)
+                    response.read()
+                    connection.close()
+                    break
+                except OSError:
+                    if time.monotonic() > deadline or process.poll() is not None:
+                        self.fail("MCP fixture failed to start")
+                    time.sleep(.05)
+            with patch.dict(os.environ, {"OMM_MCP_TOKEN": token}):
+                result = upload_to_mcp(f"http://127.0.0.1:{port}/mcp", "demo", image_bytes(), self.meta)
+                duplicate = upload_to_mcp(f"http://127.0.0.1:{port}/mcp", "demo", image_bytes(), self.meta)
+            self.assertEqual(duplicate["status"], "already_present")
+            self.assertEqual(result["image"]["sha256"], hashlib.sha256(image_bytes()).hexdigest())
+            self.assertEqual(len(result["sha256"]), 64)
+            local_file = self.base / "capture.png"
+            local_file.write_bytes(image_bytes())
+            metadata_file = self.base / "metadata.json"
+            metadata_file.write_text(json.dumps(self.meta))
+            cli = subprocess.run([sys.executable, "-m", "omm", "--root", str(self.base / "unused"),
+                                  "image-import", "--scope", "demo", "--file", str(local_file),
+                                  "--metadata", str(metadata_file), "--mcp-url", f"http://127.0.0.1:{port}/mcp"],
+                                 env=env, capture_output=True, text=True, timeout=15)
+            self.assertEqual(cli.returncode, 0, cli.stderr)
+            self.assertEqual(json.loads(cli.stdout)["items"][0]["result"]["status"], "already_present")
+            self.assertFalse((self.base / "unused").exists())
+            async def verify():
+                from mcp.server.mcpserver.exceptions import ToolError
+                server, _ = build_server(self.root)
+                listing = await server.call_tool("list_image_evidence", {"scope": "demo"})
+                self.assertEqual(json.loads(listing.content[0].text)["total"], 1)
+                read = await server.call_tool("read_image_evidence", {"path": result["path"], "variant": "original"})
+                self.assertEqual(base64.b64decode(next(x.data for x in read.content if x.type == "image")), image_bytes())
+                for changes in ({"image_sha256": "0" * 64}, {"data_base64": "!!!!"},
+                                {"data_base64": base64.b64encode(b"not an image").decode(),
+                                 "image_sha256": hashlib.sha256(b"not an image").hexdigest()},
+                                {"scope": "../outside"}):
+                    with self.assertRaises(ToolError):
+                        await server.call_tool("upload_image_evidence", {
+                            "scope": "demo", "data_base64": base64.b64encode(image_bytes()).decode(),
+                            "image_sha256": hashlib.sha256(image_bytes()).hexdigest(),
+                            "metadata": self.meta, **changes})
+                self.assertEqual(self.omm.list_images("demo")["total"], 1)
+            asyncio.run(verify())
+        finally:
+            process.terminate()
+            process.wait(timeout=10)
 
 
 if __name__ == "__main__":

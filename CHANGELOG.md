@@ -7,6 +7,9 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Adicionado
 
+- Envio de imagens pelo MCP, inclusive pela CLI sem acesso ao painel, com
+  conferência de integridade e reaproveitamento de imagens já guardadas.
+
 - Diagnóstico separa espera por acesso aos dados, atualização do índice e consulta.
 - Avaliação da busca com perguntas dos projetos e respostas esperadas, sem expor
   documentos no relatório.

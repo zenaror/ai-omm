@@ -66,7 +66,7 @@ validação do protocolo, que não chegaram à execução da ferramenta, ficam f
 
 ## Consultar o que já existe
 
-### Imagens: `list_image_evidence`, `read_image_evidence` e `delete_image_evidence`
+### Imagens: `upload_image_evidence`, `list_image_evidence`, `read_image_evidence` e `delete_image_evidence`
 
 Liste primeiro as descrições, sem carregar imagens:
 
@@ -91,8 +91,18 @@ O hash é da descrição, não dos pixels. Só remova quando autorizado: a descr
 some dos arquivos atuais e o original só sai se nenhuma outra descrição na pasta
 o usar. O histórico Git pode continuar guardando ambos.
 
-Não há upload de imagem em texto pelo MCP. Para enviar pelo painel, pela CLI ou
-por HTTP com os bytes do arquivo, siga [Guardar imagens como evidência](IMAGENS.md).
+`upload_image_evidence` recebe `scope`, `metadata` (objeto com `title`, `description`
+e `origin`), `image_sha256` e `data_base64`. O cliente deve ler e codificar o arquivo
+por código, sem colocar os bytes na conversa do modelo. Não passe um caminho local
+ao servidor: ele não tem acesso ao computador do agente. O retorno contém `path`,
+`sha256` da descrição e `image.sha256` do original. Envios idênticos são idempotentes.
+São aceitos PNG/JPEG/WebP estáticos, até 10 MiB, 16 milhões de pixels e 8.192 por lado.
+Hash divergente, base64 inválido, tipo/tamanho inválido, metadados inválidos ou cota
+excedida recusam o envio; siga o erro estruturado antes de corrigir a chamada.
+O upload usa a mesma autenticação MCP e as mesmas cotas e validações dos outros
+canais. Não busca URLs nem lê caminhos locais do servidor.
+Para transmitir sem painel, use a CLI com `--mcp-url`; veja
+[Guardar imagens como evidência](IMAGENS.md).
 
 ### `context`
 

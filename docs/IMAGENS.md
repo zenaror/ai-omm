@@ -45,11 +45,39 @@ Só use `read_image_evidence` quando os pixels forem necessários. O padrão dev
 a prévia; peça `variant="original"` para examinar detalhes. Clientes sem suporte
 visual ainda podem usar as descrições e o painel.
 
-O envio usa o painel, a CLI ou HTTP, sem colocar a imagem em texto na conversa.
+O envio usa MCP, painel, CLI ou HTTP, sem colocar a imagem em texto na conversa.
 O relatório `usage_report` conta o texto acompanhante, **não o custo visual nem
 tokens cobrados pelo provedor**. Consultar só descrições evita enviar imagens sem necessidade.
 
 ## Enviar pelo terminal (opcional)
+
+### Quando só o MCP está acessível
+
+Atualize o servidor e reconecte o MCP para descobrir `upload_image_evidence`.
+Na máquina do arquivo, instale a OMM com o extra MCP (`pip install '.[mcp]'`
+a partir de uma cópia atual do repositório). Não é preciso abrir a porta do painel.
+Com o token já no ambiente e o arquivo de descrição abaixo, execute:
+
+```sh
+omm image-import --scope meu-projeto --file captura.png --metadata captura.json \
+  --mcp-url http://servidor-omm:8000/mcp
+```
+
+`image-import-batch` também aceita `--mcp-url`. Use o endereço MCP que já funciona
+no cliente, com HTTPS quando disponível. `--server-url` e `--mcp-url` são alternativas.
+A CLI lê o arquivo, calcula o SHA e codifica os bytes automaticamente para a ferramenta;
+não peça ao modelo para escrever base64. Clientes com execução programática podem
+chamar `upload_image_evidence` diretamente com os mesmos campos, sem instalar a CLI.
+Clientes que só conseguem produzir argumentos de ferramenta por texto precisam
+do painel ou de um adaptador local; o servidor remoto não consegue ler seu disco.
+
+O resultado pequeno permite conferir caminho, hash da imagem e hash da descrição.
+Depois confirme com `list_image_evidence` e, se necessário, `read_image_evidence`.
+Erros de transporte não confirmam ausência de gravação: consulte a listagem antes
+de repetir. Os envios idênticos não criam duplicatas. O envio MCP tem prazo total
+de 90 segundos; o limite de tamanho do cliente/proxy também pode ser menor.
+
+### Arquivo de descrição e envio pelo painel remoto
 
 Na máquina que tem o arquivo, instale a versão atual da OMM. Crie `captura.json`:
 

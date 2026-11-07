@@ -60,7 +60,9 @@ def parser() -> argparse.ArgumentParser:
                                ("image-import-batch", "guardar um lote de imagens descrito por manifesto JSON")):
         image_parser = sub.add_parser(command, help=help_text)
         image_parser.add_argument("--scope", required=True, help="projeto dono das evidências")
-        image_parser.add_argument("--server-url", help="URL do painel remoto; sem ela, grava nos dados locais de --root")
+        image_destination = image_parser.add_mutually_exclusive_group()
+        image_destination.add_argument("--server-url", help="URL do painel remoto; sem destino remoto, grava nos dados locais de --root")
+        image_destination.add_argument("--mcp-url", help="URL MCP autenticada, por exemplo http://servidor:8000/mcp; não exige painel")
         image_parser.add_argument("--token-env", default="OMM_MCP_TOKEN", help="variável de ambiente com token MCP; nunca informe o token no manifesto")
         if command == "image-import":
             image_parser.add_argument("--file", type=Path, required=True)
@@ -189,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
                               "content": hit.content, "source": hit.source,
                               "authority": "locator_only"}, ensure_ascii=False))
     elif args.command in {"image-import", "image-import-batch"}:
-        from .image_transfer import read_local_image, upload_to_server
+        from .image_transfer import read_local_image, upload_to_server, upload_to_mcp
         from .image_evidence import metadata_values, scope_name
         try:
             scope_name(args.scope)
@@ -215,8 +217,12 @@ def main(argv: list[str] | None = None) -> int:
             for index, item in enumerate(items):
                 try:
                     raw = read_local_image(base / item["file"])
-                    result = (upload_to_server(args.server_url, args.scope, raw, item["metadata"], args.token_env)
-                              if args.server_url else omm.import_image(args.scope, raw, item["metadata"]))
+                    if args.mcp_url:
+                        result = upload_to_mcp(args.mcp_url, args.scope, raw, item["metadata"], args.token_env)
+                    elif args.server_url:
+                        result = upload_to_server(args.server_url, args.scope, raw, item["metadata"], args.token_env)
+                    else:
+                        result = omm.import_image(args.scope, raw, item["metadata"])
                     results.append({"index": index, "ok": True, "result": result})
                 except (OSError, ValueError) as exc:
                     results.append({"index": index, "ok": False, **error_report(exc, "image-import")})

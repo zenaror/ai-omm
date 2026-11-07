@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from email import policy
 from email.parser import BytesParser
+import base64
+import binascii
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +16,25 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 from .image_evidence import MAX_CARD_BYTES, MAX_IMAGE_BYTES, metadata_values, scope_name
 
 MAX_UPLOAD_BYTES = MAX_IMAGE_BYTES + MAX_CARD_BYTES + 65536
+
+
+def decode_mcp_image(data_base64: str, image_sha256: str) -> bytes:
+    """Decode bounded transport data; never treat a caller path as server-local."""
+    if (not isinstance(data_base64, str) or not data_base64
+            or len(data_base64) > 4 * ((MAX_IMAGE_BYTES + 2) // 3)):
+        raise ValueError("Envie uma imagem de até 10 MiB em base64, gerado pelo cliente.")
+    if (not isinstance(image_sha256, str) or len(image_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in image_sha256)):
+        raise ValueError("Informe o SHA-256 hexadecimal minúsculo do arquivo original.")
+    try:
+        raw = base64.b64decode(data_base64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("Base64 inválido; envie os bytes codificados pelo cliente, sem prefixo data:.") from exc
+    if not raw or len(raw) > MAX_IMAGE_BYTES:
+        raise ValueError("Cada imagem precisa ter até 10 MiB e não pode estar vazia.")
+    if hashlib.sha256(raw).hexdigest() != image_sha256:
+        raise ValueError("SHA-256 da imagem não confere; nenhuma evidência foi gravada.")
+    return raw
 
 
 def parse_upload(content_type: str, body: bytes) -> tuple[str, bytes, dict]:
@@ -79,3 +101,45 @@ def read_local_image(path: Path) -> bytes:
     if not raw or len(raw) > MAX_IMAGE_BYTES:
         raise ValueError("Cada imagem precisa ter até 10 MiB e não pode estar vazia.")
     return raw
+
+
+def upload_to_mcp(server_url: str, scope: str, raw: bytes, metadata: dict,
+                  token_env: str = "OMM_MCP_TOKEN") -> dict:
+    """Transfer a local file through the MCP endpoint without model transcription."""
+    import asyncio
+    url = urlsplit(server_url)
+    if url.scheme not in {"http", "https"} or not url.netloc or url.username or url.password or url.query or url.fragment:
+        raise ValueError("Informe a URL MCP sem credenciais, query ou fragmento.")
+    token = os.getenv(token_env, "")
+    if not token or any(c in token for c in "\r\n"):
+        raise ValueError("Defina o token MCP na variável de ambiente indicada.")
+    scope_name(scope)
+    metadata_values(metadata)
+    if not raw or len(raw) > MAX_IMAGE_BYTES:
+        raise ValueError("Cada imagem precisa ter até 10 MiB e não pode estar vazia.")
+    try:
+        import httpx2
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+    except ImportError as exc:
+        raise ValueError("Para envio MCP instale a OMM com o extra mcp: pip install 'ai-omm[mcp]'.") from exc
+
+    async def send():
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + token},
+                                     timeout=60, follow_redirects=False) as http:
+            async with streamable_http_client(server_url, http_client=http) as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    await session.initialize()
+                    result = await session.call_tool("upload_image_evidence", {
+                        "scope": scope, "data_base64": base64.b64encode(raw).decode("ascii"),
+                        "image_sha256": hashlib.sha256(raw).hexdigest(), "metadata": metadata})
+                    if result.is_error:
+                        raise ValueError("O servidor recusou o envio MCP. Confira formato, metadados, cota e versão da OMM.")
+                    return json.loads(next(item.text for item in result.content if item.type == "text"))
+    async def bounded():
+        return await asyncio.wait_for(send(), timeout=90)
+    try:
+        return asyncio.run(bounded())
+    except Exception as exc:
+        # Transport exceptions can contain request bodies or credentials; never print them.
+        raise ValueError("Envio MCP não confirmado. Confira endereço, acesso, extra mcp e versão do servidor; consulte a listagem antes de repetir.") from None
