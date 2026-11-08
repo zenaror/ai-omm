@@ -223,13 +223,9 @@ class OMM:
                 raise KeyError(proposal_id)
             if proposal.get("status") != "pending":
                 raise ValueError("Esta sugestão já foi revisada.")
-            record_id = None
-            if approve:
-                record = MemoryRecord.from_json(json.dumps(proposal["record"], ensure_ascii=False))
-                if record.id not in self._records_by_id():
-                    self.remember(record)
-                record_id = record.id
-            updated = self.store.update_proposal(proposal_id, "accepted" if approve else "rejected", record_id)
+            result = self.review_proposals([proposal_id], approve)
+            updated = next(item for item in self.store.proposals() if item["id"] == proposal_id)
+            updated["index_pending"] = result["index_pending"]
             return updated
 
     def review_proposals(self, proposal_ids: list[str], approve: bool) -> dict:
@@ -241,7 +237,8 @@ class OMM:
         with self.operation_lock():
             pending = [p for p in self.store.proposals(True) if p.get("id") in selected]
             records = []
-            if approve:
+            index_pending = False
+            if approve and pending:
                 workstreams = {item["id"] for item in self.store.workstreams()}
                 for proposal in pending:
                     record = MemoryRecord.from_json(json.dumps(proposal["record"], ensure_ascii=False))
@@ -249,21 +246,41 @@ class OMM:
                     if record.workstream_id and record.workstream_id not in workstreams:
                         raise ValueError("Uma sugestão aponta para uma frente de trabalho inexistente.")
                     records.append(record)
-                self._ensure_index_current(force=True)
-                existing = set(self._records_by_id())
+                # Approval is canonical work, not an occasion to reindex every source.
+                # Never advance an already-stale fingerprint: source searches must still
+                # notice changes even when note rows have been updated incrementally.
+                available, was_current = False, False
+                try:
+                    available = self.retriever.has_expected_schema()
+                    was_current = available and self.retriever.indexed_fingerprint() == self._canonical_fingerprint()
+                except (OSError, sqlite3.Error, RuntimeError):
+                    pass
+                existing = dict(self._records_by_id())
+                additions = []
                 for record in records:
                     if record.id not in existing:
-                        self.store.append(record)
-                        self.retriever.add(record)
-                        existing.add(record.id)
-                self.retriever.set_indexed_fingerprint(self._canonical_fingerprint())
-                self._last_index_check = monotonic()
-                self._index_file_signature = self._current_index_file_signature()
-                self._index_schema_valid = True
+                        additions.append(record)
+                        existing[record.id] = record
+                self.store.append_many(additions)
             updates = {p["id"]: p["record"]["id"] if approve else None for p in pending}
             if updates:
                 self.store.update_proposals(updates, "accepted" if approve else "rejected")
-            return {"reviewed": len(pending), "skipped": len(selected) - len(pending)}
+            if approve and pending:
+                index_pending = True
+                if available:
+                    try:
+                        indexed = list({r.id: existing[r.id] for r in records}.values())
+                        self.retriever.add_many(indexed, self._canonical_fingerprint() if was_current else None)
+                        index_pending = not was_current
+                    except (OSError, sqlite3.Error, RuntimeError):
+                        # The accepted notes are safe in Git-backed files. A subsequent
+                        # search/rebuild repairs the disposable index, including retries.
+                        logging.getLogger(__name__).warning("omm_approval_index_pending records=%d", len(records))
+                self._last_index_check = 0.0 if index_pending else monotonic()
+                self._index_file_signature = self._current_index_file_signature()
+                self._index_schema_valid = available
+            return {"reviewed": len(pending), "skipped": len(selected) - len(pending),
+                    "index_pending": index_pending}
 
     def set_record_status(self, record_id: str, status: str) -> MemoryRecord:
         with self.operation_lock():

@@ -27,6 +27,7 @@ class Retriever(Protocol):
     def rebuild(self, records: list[MemoryRecord], source_chunks: list[SourceChunk] | None = None,
                 fingerprint: str | None = None) -> None: ...
     def add(self, record: MemoryRecord) -> None: ...
+    def add_many(self, records: list[MemoryRecord], fingerprint: str | None = None) -> None: ...
     def search(self, query: str, limit: int = 10,
                scopes: list[str] | None = None) -> list[MemoryRecord]: ...
     def search_sources(self, query: str, limit: int = 10,
@@ -123,11 +124,22 @@ class SQLiteFTSRetriever:
                            (fingerprint,))
 
     def add(self, record: MemoryRecord) -> None:
-        with self._connect() as db:
-            db.execute("DELETE FROM records WHERE id=?", (record.id,))
-            if record.status == "active":
-                db.execute("INSERT INTO records(id,kind,scope,title,content,source,tags) VALUES(?,?,?,?,?,?,?)",
-                           (record.id, record.kind, record.scope, record.title, record.content, record.source, " ".join(record.tags)))
+        self.add_many([record])
+
+    def add_many(self, records: list[MemoryRecord], fingerprint: str | None = None) -> None:
+        """Update note rows and their version in one transaction, without touching sources."""
+        db = self._connect()
+        try:
+            with db:
+                db.executemany("DELETE FROM records WHERE id=?", [(record.id,) for record in records])
+                db.executemany("INSERT INTO records(id,kind,scope,title,content,source,tags) VALUES(?,?,?,?,?,?,?)",
+                               [(r.id, r.kind, r.scope, r.title, r.content, r.source, " ".join(r.tags))
+                                for r in records if r.status == "active"])
+                if fingerprint is not None:
+                    db.execute("INSERT OR REPLACE INTO index_metadata(key,value) VALUES('canonical_fingerprint',?)",
+                               (fingerprint,))
+        finally:
+            db.close()
 
     def search(self, query: str, limit: int = 10, scopes: list[str] | None = None) -> list[MemoryRecord]:
         if not query.strip():

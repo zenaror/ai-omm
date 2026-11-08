@@ -187,6 +187,20 @@ Na primeira inicialização, o restore automático baixa os dados se a pasta est
 
 No painel, **Sincronizar backup** salva as mudanças locais e busca novidades. **Atualizar** apenas recarrega a página. Se uma mudança não puder ser juntada com segurança, a OMM preserva uma cópia em `memory/imports/sync-recovery/` para revisão.
 
+Na aba **Revisão**, **Aprovar todas** guarda somente as sugestões presentes na
+lista confirmada. As decisões ficam nos arquivos da OMM antes de atualizar a
+busca; uma falha no índice não desfaz as aprovações. As notas são acrescentadas
+à busca em lote, sem reconstruir todos os documentos-fonte nessa ação.
+Se havia fontes novas ou o índice falhou, o painel informa que a busca precisa
+de atualização. A próxima consulta de busca pode levar mais tempo para
+incorporar essas fontes. Isso não significa que as aprovações foram perdidas.
+Confira a lista antes de repetir uma ação após erro de conexão.
+
+Uma sincronização ou outra operação pesada já em andamento ainda pode manter
+o servidor ocupado. Aguarde a resposta; recarregar ou reiniciar não torna o
+disco mais rápido. O painel mantém um aviso de carregamento ou falha, além do
+aviso passageiro. Essas mensagens não confirmam envio ao backup remoto.
+
 ### Sincronizar pelo terminal ou por automação
 
 Também é possível fazer a mesma sincronização sem abrir o painel. Abra um terminal na pasta que contém `compose.yaml` e `.env` e use o comando da ferramenta de containers que você instalou:

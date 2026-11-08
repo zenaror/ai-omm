@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -139,8 +140,16 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
         index_path = omm.root / ".omm" / "index.sqlite3"
         index_bytes = index_path.stat().st_size if index_path.exists() else 0
         index_updated_at = datetime.fromtimestamp(index_path.stat().st_mtime).astimezone().isoformat(timespec="minutes") if index_path.exists() else None
-        newest_canonical_change = max(memory_change, source_change)
-        index_current = bool(index_path.exists() and index_path.stat().st_mtime >= newest_canonical_change)
+        # An incremental note update can make the DB newer than stale sources.
+        # Compare its recorded version, not modification dates, without rebuilding.
+        index_current = False
+        source_chunk_count = 0
+        try:
+            if omm.retriever.has_expected_schema():
+                index_current = omm.retriever.indexed_fingerprint() == omm._canonical_fingerprint()
+                source_chunk_count = omm.source_chunk_count()
+        except (OSError, sqlite3.Error, RuntimeError):
+            pass  # Canonical notes remain visible when the disposable index fails.
         backup_commit_at = None
         try:
             backup_commit_at = subprocess.run(
@@ -237,7 +246,7 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
                 "index_bytes": index_bytes, "index_updated_at": index_updated_at,
                 "index_current": index_current,
                 "backup_commit_at": backup_commit_at,
-                "source_chunk_count": omm.source_chunk_count(), "policy_count": len(policies),
+                "source_chunk_count": source_chunk_count, "policy_count": len(policies),
                 "handoff_count": len(handoffs), "agent_count": len(agents),
                 "kinds": kinds, "scopes": by_scope,
             },
@@ -273,8 +282,13 @@ def make_handler(omm: OMM):
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'")
             self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                # A browser may leave while sync/search is busy. Do not attempt a
+                # second error response over the same disconnected socket.
+                pass
 
         def _send_json(self, status: int, value: dict) -> None:
             self._send(status, json.dumps(value, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
@@ -406,9 +420,15 @@ def make_handler(omm: OMM):
                     message = f"{result['reviewed']} sugestões {verb}."
                     if result["skipped"]:
                         message += f" {result['skipped']} já revisadas ou indisponíveis foram ignoradas."
+                    if result["index_pending"]:
+                        message += " As decisões estão salvas; a busca será atualizada na próxima consulta."
                     self._send_json(200, {**result, "message": message})
                 except (ValueError, TypeError, json.JSONDecodeError) as exc:
                     self._send_json(400, {"error": str(exc) or "Pedido inválido."})
+                except (OSError, sqlite3.Error, RuntimeError) as exc:
+                    report = error_report(exc, "review_proposals")["error"]
+                    self._send_json(503, {"error": report["message"], "code": report["code"],
+                                          "recovery": "Atualize a lista para conferir o que foi guardado antes de tentar novamente."})
                 return
             proposal_match = re.fullmatch(r"/api/proposals/([A-Za-z0-9-]+)/review", urlsplit(self.path).path)
             if proposal_match:
@@ -422,7 +442,10 @@ def make_handler(omm: OMM):
                         raise ValueError("Escolha aprovar ou recusar a sugestão.")
                     proposal = omm.review_proposal(unquote(proposal_match.group(1)), action == "approve")
                     message = "Sugestão aprovada e adicionada à busca." if action == "approve" else "Sugestão recusada; o histórico foi preservado."
-                    self._send_json(200, {"id": proposal["id"], "status": proposal["status"], "message": message})
+                    if proposal["index_pending"]:
+                        message = "Sugestão aprovada e guardada. A busca será atualizada na próxima consulta."
+                    self._send_json(200, {"id": proposal["id"], "status": proposal["status"],
+                                          "index_pending": proposal["index_pending"], "message": message})
                 except KeyError:
                     self._send_json(404, {"error": "Essa sugestão não existe mais."})
                 except (ValueError, TypeError, json.JSONDecodeError) as exc:

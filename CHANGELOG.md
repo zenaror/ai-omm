@@ -5,6 +5,12 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ## [Não lançado]
 
+### Consertado
+
+- Aprovar sugestões guarda as decisões sem esperar pela reconstrução de todas
+  as fontes da busca. O painel informa quando a busca ainda precisa atualizar
+  e mantém um aviso visível se não conseguir carregar os dados.
+
 ### Adicionado
 
 - Envio de imagens pelo MCP, inclusive pela CLI sem acesso ao painel, com

@@ -48,6 +48,21 @@ class CanonicalStore:
         with self.records_path.open("a", encoding="utf-8") as stream:
             stream.write(record.to_json() + "\n")
 
+    def append_many(self, records: list[MemoryRecord]) -> None:
+        """Publish a validated batch atomically; caller holds the data lock."""
+        if not records:
+            return
+        for record in records:
+            record.validate()
+        self.initialize()
+        original = self.records_path.read_text(encoding="utf-8")
+        if original and not original.endswith("\n"):
+            original += "\n"
+        temporary = self.records_path.with_suffix(".jsonl.tmp")
+        temporary.write_text(original + "".join(record.to_json() + "\n" for record in records),
+                             encoding="utf-8")
+        temporary.replace(self.records_path)
+
     def update_record_status(self, record_id: str, status: str) -> MemoryRecord:
         """Change one record's status without discarding its provenance."""
         if status not in {"active", "superseded", "retracted", "unverified"}:
