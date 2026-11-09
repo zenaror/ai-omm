@@ -62,7 +62,17 @@ inclui as antigas, quando essa informação ainda não era coletada. Não deduza
 a causa das falhas antigas a partir das novas. Erros de autenticação ou de
 validação do protocolo, que não chegaram à execução da ferramenta, ficam fora.
 
-**Limites:** são caracteres JSON e tempos internos, não tokens cobrados ou economia provada. Não inclui chamadas ao painel ou à CLI, tempo de rede, cache, descrições das ferramentas ou custos externos dos subagentes. Não guarda perguntas, respostas, senhas, mensagens de erro ou hashes de consultas. Não distingue clientes nem mede repetições. Os nomes de escopo são guardados; não coloque dados pessoais neles. Retém 30 dias por padrão em `.omm/usage.sqlite3`, fora do backup Git. A coleta começa nesta versão, sem histórico retroativo. Veja as [opções de coleta](USAR_OMM_NOS_AGENTES.md#medição-contínua-das-chamadas).
+`source_error_rows` agrupa falhas de leitura pelo código e pela impressão digital
+da lista de caminhos, sem guardar os caminhos. Isso permite reconhecer tentativas
+repetidas; não explica sozinho a causa. São até 200 grupos por dia e 20 no relatório.
+`source_errors_overflow` conta o excesso no conjunto de projetos, mesmo em relatório
+filtrado. Lotes usam uma chave conjunta: ela não identifica qual item falhou.
+Para comparar um caminho conhecido, calcule SHA-256 do JSON compacto da lista
+ordenada de caminhos em UTF-8, sem espaços e sem converter Unicode em escapes.
+Exemplo local: `hashlib.sha256(json.dumps([path], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()`.
+Só falhas novas recebem essa informação; ela não esclarece retroativamente eventos antigos.
+
+**Limites:** são caracteres JSON e tempos internos, não tokens cobrados ou economia provada. Não inclui chamadas ao painel ou à CLI, tempo de rede, cache, descrições das ferramentas ou custos externos dos subagentes. Não guarda perguntas, respostas, senhas, mensagens de erro ou hashes de consultas. Não distingue clientes nem mede repetição de contexto ou trabalho. Os nomes de escopo são guardados; não coloque dados pessoais neles. Retém 30 dias por padrão em `.omm/usage.sqlite3`, fora do backup Git. A coleta começa nesta versão, sem histórico retroativo. Veja as [opções de coleta](USAR_OMM_NOS_AGENTES.md#medição-contínua-das-chamadas).
 
 ## Consultar o que já existe
 
@@ -210,6 +220,62 @@ Leia algumas linhas de um documento e obtenha a impressão digital do arquivo in
   "end_line": 40
 }
 ```
+
+### `read_source_batch`
+
+Leia vários trechos de uma vez quando um script precisar recuperar documentos
+inteiros. Para entender uma decisão, continue abrindo apenas o trecho necessário.
+O retorno preserva caracteres, acentos e quebras de linha do original.
+
+```json
+{"requests": [{"path": "sources/meu-projeto/docs/regras.md", "start_char": 0, "max_chars": 8000}]}
+```
+
+São até 8 pedidos, até 32.768 caracteres por pedido e 65.536 no lote todo.
+Cada item devolve o SHA-256 integral, o conteúdo e `next_start_char`. Use esse
+próximo valor para continuar, passando também `expected_sha256` com o hash
+recebido. Se o arquivo mudar, o lote é recusado. A unidade é caractere Unicode,
+não byte. Ao terminar, junte o texto, converta para UTF-8 e confira o hash integral.
+Um lote não representa uma fotografia simultânea de documentos diferentes.
+
+Use esta transferência por script e apresente ao modelo apenas os recibos ou
+trechos úteis ao raciocínio. Reduzir chamadas não comprova economia de tokens.
+`read_source` continua disponível e agora informa `total_lines`; quando não há
+corte de conteúdo, também informa a próxima linha. Linhas longas devem usar o lote.
+
+### `upload_artifact` e `read_artifact`
+
+Guarde um arquivo necessário à retomada, como um pacote compactado ou um save
+próprio. A OMM guarda os bytes originais e uma descrição pesquisável. O arquivo
+em si fica fora da busca textual e semântica. Não é aberto como programa nem
+descompactado pelo servidor.
+
+Peça ao assistente: “Guarde este arquivo para recuperação, com origem e hash”.
+Ele deve ler e codificar os bytes por script, sem redigitá-los no chat. O envio
+recebe `scope`, `content_base64`, `sha256`, `title`, `description` e `origin`.
+O servidor confere o hash; não sobrescreve originais. Repetir os mesmos bytes e
+metadados devolve o recibo existente. Outra descrição reutiliza os mesmos bytes.
+
+Cada arquivo aceita até **8 MiB**. Há cota padrão de **512 MiB por projeto**,
+ajustável com `OMM_ARTIFACT_SCOPE_QUOTA_MIB` (1 a 16.384). Para arquivo maior,
+divida por script e guarde um manifesto com ordem, hashes e instrução de montagem.
+O conteúdo binário não é analisado para remover segredos: confira o que está
+autorizado a guardar antes do envio. Imagens devem continuar usando seu fluxo
+próprio, que confere o formato e oferece prévias.
+
+O recibo contém `path`, `sha256` e `bytes`. Passe o caminho `.artifact.md` e esse
+hash a `read_artifact` como `expected_sha256`. `offset` começa em zero;
+`max_bytes` vale 65.536 por padrão e aceita até 262.144. Decodifique o base64
+retornado, confira `chunk_sha256` e continue em `next_offset` até ele ser nulo.
+Confira também o hash do arquivo montado. O hash de um recibo sozinho não prova
+que você conseguiu restaurar os bytes.
+
+Originais e descrições ficam juntos em `sources/<projeto>/artifacts/` e fazem
+parte do backup Git normal. **Atualize os serviços da OMM e de backup antes de
+usar este envio**: versões antigas do backup não reconhecem arquivos `.blob`.
+O backup recusa arquivos ausentes, corrompidos ou sem descrição válida. Não há
+ferramenta de remoção de artefatos nesta versão. O acervo anterior em Markdown
+continua intacto; nenhuma migração ou exclusão é automática.
 
 ### `semantic_search`
 

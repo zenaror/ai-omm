@@ -12,6 +12,7 @@ import tempfile
 from datetime import datetime, timezone
 from typing import Any
 from .image_evidence import IMAGE_SUFFIXES, MAX_IMAGE_BYTES, inspect_image
+from . import artifacts
 
 
 _SCOPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$")
@@ -131,6 +132,7 @@ def _source_files(root: Path, source: str, target: str) -> tuple[list[dict[str, 
     if not source_dir.exists():
         return [], blockers, False
     files: list[dict[str, Any]] = []
+    artifact_blobs, artifact_references = set(), set()
     for path in sorted(source_dir.rglob("*")):
         if path.is_symlink():
             blockers.append(f"Há link simbólico em sources/{source}; nenhum arquivo será movido.")
@@ -140,9 +142,18 @@ def _source_files(root: Path, source: str, target: str) -> tuple[list[dict[str, 
         if not path.is_file():
             blockers.append(f"Há um item que não é arquivo comum em sources/{source}.")
             continue
-        if path.suffix.lower() not in {".md", *IMAGE_SUFFIXES}:
+        if path.suffix.lower() not in {".md", ".blob", *IMAGE_SUFFIXES}:
             blockers.append(f"Formato não aceito na mesclagem: {path.relative_to(root)}.")
             continue
+        if path.name.endswith(artifacts.CARD_SUFFIX):
+            try:
+                card, _ = artifacts._read(root, path.relative_to(root).as_posix())
+                artifact_references.add(path.parent / card["artifact"]["filename"])
+            except (ValueError, OSError):
+                blockers.append("Há descrição ou arquivo de recuperação inválido na origem.")
+                continue
+        if path.suffix.lower() == ".blob":
+            artifact_blobs.add(path)
         if path.suffix.lower() in IMAGE_SUFFIXES:
             try:
                 with path.open("rb") as image:
@@ -187,6 +198,8 @@ def _source_files(root: Path, source: str, target: str) -> tuple[list[dict[str, 
             "content": data,
             "mode": stat.S_IMODE(path.stat().st_mode),
         })
+    if artifact_blobs - artifact_references:
+        blockers.append("Há arquivo de recuperação sem descrição válida na origem.")
     return files, blockers, True
 
 

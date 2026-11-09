@@ -5,6 +5,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 import inspect
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -44,6 +45,11 @@ class UsageRecorder:
             day TEXT NOT NULL, tool TEXT NOT NULL, scope TEXT NOT NULL,
             error_code TEXT NOT NULL, failures INTEGER NOT NULL,
             PRIMARY KEY(day, tool, scope, error_code))""")
+        db.execute("""CREATE TABLE IF NOT EXISTS usage_source_failures_daily (
+            day TEXT NOT NULL, tool TEXT NOT NULL, scope TEXT NOT NULL,
+            error_code TEXT NOT NULL, path_key TEXT NOT NULL, path_kind TEXT NOT NULL,
+            request_count INTEGER NOT NULL, failures INTEGER NOT NULL,
+            PRIMARY KEY(day,tool,scope,error_code,path_key,path_kind,request_count))""")
         return db
 
     @staticmethod
@@ -61,6 +67,9 @@ class UsageRecorder:
     @staticmethod
     def _scope(arguments: dict) -> str:
         value = arguments.get("scope")
+        if value is None and isinstance(arguments.get("requests"), list) and 1 <= len(arguments["requests"]) <= 8:
+            scopes = {UsageRecorder._scope({"path": r.get("path")}) for r in arguments["requests"] if isinstance(r, dict)}
+            value = scopes.pop() if len(scopes) == 1 else "_unspecified"
         if value is None:
             path = arguments.get("path", "")
             parts = path.split("/") if isinstance(path, str) else []
@@ -69,13 +78,36 @@ class UsageRecorder:
             return "_unspecified"
         return value
 
+    @staticmethod
+    def _source_failure_detail(tool, arguments):
+        if tool not in {"read_source", "read_source_batch", "read_artifact"}:
+            return None
+        requests = arguments.get("requests") if tool == "read_source_batch" else [{"path": arguments.get("path")}]
+        if not isinstance(requests, list) or not 1 <= len(requests) <= 8:
+            return ("invalid", "invalid", 0)
+        paths = []
+        for item in requests:
+            path = item.get("path") if isinstance(item, dict) else None
+            if (not isinstance(path, str) or len(path) > 2048 or "\\" in path
+                    or any(ord(c) < 32 for c in path) or not path.startswith("sources/")
+                    or any(p in {"", ".", ".."} for p in path.split("/"))):
+                return ("invalid", "invalid", len(requests))
+            paths.append(path)
+        # Correlation only: no filenames, paths, arguments or exception text retained.
+        try:
+            key = hashlib.sha256(json.dumps(paths, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+        except UnicodeError:
+            return ("invalid", "invalid", len(requests))
+        return (key, "batch" if tool == "read_source_batch" else "single", len(paths))
+
     def _record(self, tool: str, scope: str, inputs: int, outputs: int,
-                elapsed_ms: float, failed: bool, error_code: str | None = None):
+                elapsed_ms: float, failed: bool, error_code: str | None = None, source_detail=None):
         now = datetime.now(timezone.utc)
         cutoff = (now - timedelta(days=self.retention_days - 1)).date().isoformat()
         with closing(self._connect()) as db, db:
             db.execute("DELETE FROM usage_daily WHERE day < ?", (cutoff,))
             db.execute("DELETE FROM usage_errors_daily WHERE day < ?", (cutoff,))
+            db.execute("DELETE FROM usage_source_failures_daily WHERE day < ?", (cutoff,))
             known = db.execute("SELECT 1 FROM usage_daily WHERE scope=? LIMIT 1", (scope,)).fetchone()
             if not known and db.execute("SELECT COUNT(DISTINCT scope) FROM usage_daily").fetchone()[0] >= 128:
                 scope = "_other"
@@ -91,6 +123,15 @@ class UsageRecorder:
                 db.execute("""INSERT INTO usage_errors_daily VALUES(?,?,?,?,1)
                     ON CONFLICT(day,tool,scope,error_code) DO UPDATE SET failures=failures+1""",
                     (now.date().isoformat(), tool, scope, code))
+                if source_detail is not None:
+                    key, kind, count = source_detail
+                    identity = (now.date().isoformat(), tool, scope, code, key, kind, count)
+                    exists = db.execute("SELECT 1 FROM usage_source_failures_daily WHERE day=? AND tool=? AND scope=? AND error_code=? AND path_key=? AND path_kind=? AND request_count=?", identity).fetchone()
+                    if not exists and db.execute("SELECT COUNT(*) FROM usage_source_failures_daily WHERE day=?", (identity[0],)).fetchone()[0] >= 200:
+                        identity = (identity[0], "_overflow", "_other", "INTERNAL_ERROR", "overflow", "overflow", 0)
+                    db.execute("""INSERT INTO usage_source_failures_daily VALUES(?,?,?,?,?,?,?,1)
+                        ON CONFLICT(day,tool,scope,error_code,path_key,path_kind,request_count)
+                        DO UPDATE SET failures=failures+1""", identity)
 
     def wrap(self, function):
         signature = inspect.signature(function)
@@ -126,7 +167,8 @@ class UsageRecorder:
             finally:
                 elapsed_ms = (perf_counter() - started) * 1000
                 try:
-                    self._record(function.__name__, scope, input_chars, output_chars, elapsed_ms, failed, error_code)
+                    detail = self._source_failure_detail(function.__name__, scope_args) if failed else None
+                    self._record(function.__name__, scope, input_chars, output_chars, elapsed_ms, failed, error_code, detail)
                 except (OSError, sqlite3.Error):
                     # Optional telemetry must never turn a successful write into an error.
                     self.write_failures += 1
@@ -147,6 +189,8 @@ class UsageRecorder:
                   "timezone": "UTC", "transport": "MCP", "write_failures_since_start": self.write_failures,
                   "measurement": "Caracteres JSON e tempo interno; não mede pixels/imagens, tokens cobrados, cache, rede ou descrições das ferramentas.",
                   "rows": [], "error_rows": [],
+                  "source_error_rows": [], "source_errors_overflow": 0,
+                  "source_error_measurement": "Amostra limitada a 200 grupos por dia, desde esta versão. path_key é SHA-256 do JSON compacto da lista ordenada de caminhos UTF-8; não guarda caminhos nem conteúdo. Lotes têm chave conjunta, não identificam qual item falhou. Não mede retrospectivamente falhas antigas.",
                   "error_measurement": "Categorias de falhas desde esta versão; falhas antigas não têm categoria. Sem mensagens de erro ou conteúdo das chamadas."}
         if not self.enabled or not self.path.exists():
             return result
@@ -199,4 +243,13 @@ class UsageRecorder:
             result["unclassified_failures"] = max(0, result["totals"]["failures"] - result["classified_failures"])
             result["error_rows"] = [{"tool": tool, "scope": project, "code": code, "failures": count}
                                     for tool, project, code, count in errors[:50]]
+            source_sql = "SELECT tool,scope,error_code,path_key,path_kind,request_count,SUM(failures) FROM usage_source_failures_daily WHERE day>=? AND path_kind!='overflow'"
+            if scope is not None:
+                source_sql += " AND scope=?"
+            source_rows = list(db.execute(source_sql + " GROUP BY tool,scope,error_code,path_key,path_kind,request_count ORDER BY SUM(failures) DESC,path_key LIMIT 21", params))
+            result["source_errors_truncated"] = len(source_rows) > 20
+            result["source_error_rows"] = [dict(tool=t, scope=s, code=c, path_key=k, path_kind=kind, request_count=n, failures=f)
+                                            for t,s,c,k,kind,n,f in source_rows[:20]]
+            # Overflow cannot be assigned to a project reliably; label it globally.
+            result["source_errors_overflow"] = db.execute("SELECT COALESCE(SUM(failures),0) FROM usage_source_failures_daily WHERE day>=? AND path_kind='overflow'", (cutoff,)).fetchone()[0]
         return result

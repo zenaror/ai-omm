@@ -154,7 +154,7 @@ def read_source_markdown(root: Path, source: str, start_line: int,
         raise ValueError("Escolha um trecho de até 80 linhas.")
     target = _managed_source_path(root, source)
     with target.open("rb") as stream:
-        raw = stream.read()
+        raw = stream.read(MAX_SOURCE_FILE_BYTES + 1)
         modified_at = os.fstat(stream.fileno()).st_mtime
     if len(raw) > MAX_SOURCE_FILE_BYTES:
         raise ValueError("A fonte é grande demais para abrir por esta ferramenta.")
@@ -175,12 +175,57 @@ def read_source_markdown(root: Path, source: str, start_line: int,
         "origin": "canonical",
         "file_modified_at": datetime.fromtimestamp(modified_at, timezone.utc).isoformat(),
         "currentness": "not_verified",
+        "total_lines": len(lines),
+        "next_start_line": end_line + 1 if end_line < len(lines) and len(selected) <= 8000 else None,
     }
 
 
+def read_source_batch(root: Path, requests: list[dict]) -> dict:
+    """Exact UTF-8 windows for scripted recovery, bounded independently of line length."""
+    if not isinstance(requests, list) or not 1 <= len(requests) <= 8:
+        raise ValueError("Peça de 1 a 8 trechos por lote.")
+    normalized = []
+    for item in requests:
+        if not isinstance(item, dict) or set(item) - {"path", "start_char", "max_chars", "expected_sha256"}:
+            raise ValueError("Use path, start_char, max_chars e, opcionalmente, expected_sha256.")
+        start, size = item.get("start_char", 0), item.get("max_chars", 8000)
+        if type(start) is not int or start < 0 or type(size) is not int or not 1 <= size <= 32768:
+            raise ValueError("Use start_char a partir de zero e max_chars entre 1 e 32768.")
+        expected = item.get("expected_sha256")
+        if expected is not None and (not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected)):
+            raise ValueError("Informe um SHA-256 completo em expected_sha256.")
+        normalized.append((_managed_source_path(root, item.get("path")), start, size, expected))
+    if sum(item[2] for item in normalized) > 65536:
+        raise ValueError("O lote aceita até 65536 caracteres solicitados no total.")
+    cached, items = {}, []
+    for target, start, size, expected in normalized:
+        if target not in cached:
+            with target.open("rb") as stream:
+                raw = stream.read(MAX_SOURCE_FILE_BYTES + 1)
+            if len(raw) > MAX_SOURCE_FILE_BYTES:
+                raise ValueError("A fonte excede 20 MiB.")
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeError as exc:
+                raise ValueError("A fonte precisa estar em UTF-8.") from exc
+            cached[target] = text, len(raw), hashlib.sha256(raw).hexdigest()
+        text, byte_count, digest = cached[target]
+        if expected is not None and digest != expected:
+            raise OMMError("VERSION_CONFLICT", "A fonte mudou; o lote não foi devolvido.", "Releia os metadados e reinicie a recuperação dessa fonte.")
+        if start > len(text):
+            raise ValueError("start_char passa do fim da fonte.")
+        content = text[start:start + size]
+        end = start + len(content)
+        items.append({"source": target.relative_to(root.resolve()).as_posix(), "content": content,
+                      "start_char": start, "next_start_char": end if end < len(text) else None,
+                      "total_chars": len(text), "total_bytes": byte_count, "sha256": digest,
+                      "origin": "canonical", "currentness": "not_verified"})
+    return {"items": items, "count": len(items)}
+
+
 def _editable_source(source: str) -> None:
-    if isinstance(source, str) and source.endswith(".image-evidence.md"):
-        raise ValueError("Descrições de imagens são preservadas com o original. Use o fluxo de evidências para importar ou remover; não edite como texto comum.")
+    if isinstance(source, str) and source.endswith((".image-evidence.md", ".artifact.md")):
+        raise ValueError("Descrições de imagens e arquivos são preservadas com o original; não edite como texto comum.")
 
 
 def replace_source_markdown(root: Path, source: str, content: str,
@@ -401,6 +446,11 @@ def read_source_chunks(root: Path, max_chars: int = MAX_CHUNK_CHARS) -> list[Sou
             body, marker, _ = text.rpartition(MARKER)
             if marker:
                 text = body  # Search the human description once, not duplicated JSON metadata.
+        if path.name.endswith(".artifact.md"):
+            from .artifacts import MARKER
+            body, marker, _ = text.rpartition(MARKER)
+            if marker:
+                text = body
         headings: list[tuple[int, str]] = []
         current: list[tuple[int, str]] = []
         current_chars = 0

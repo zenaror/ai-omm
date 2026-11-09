@@ -14,6 +14,7 @@ from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo
 from .locking import data_lock
 from .image_evidence import CARD_SUFFIX, IMAGE_SUFFIXES, MAX_IMAGE_BYTES, inspect_image, read_image
+from . import artifacts
 
 CANONICAL_PATHS = ("memory", "skills", "sources")
 MAX_SOURCE_PDF_BYTES = 100 * 1024 * 1024
@@ -56,6 +57,7 @@ def _validate_sources(root: Path) -> None:
     sources = root / "sources"
     if not sources.exists():
         return
+    blobs, referenced = set(), set()
     for path in sources.rglob("*"):
         if path.is_symlink():
             raise BackupError(f"documentos-fonte não podem apontar para fora da pasta de dados: {path.relative_to(root)}")
@@ -67,6 +69,11 @@ def _validate_sources(root: Path) -> None:
                 path.read_text(encoding="utf-8")
                 if path.name.endswith(CARD_SUFFIX):
                     read_image(root, path.relative_to(root).as_posix(), "original")
+                elif path.name.endswith(artifacts.CARD_SUFFIX):
+                    card, _ = artifacts._read(root, path.relative_to(root).as_posix())
+                    referenced.add(path.parent / card["artifact"]["filename"])
+            elif suffix == ".blob":
+                blobs.add(path)
             elif suffix == ".pdf":
                 if path.stat().st_size > MAX_SOURCE_PDF_BYTES:
                     raise BackupError(f"PDF-fonte excede 100 MB: {path.relative_to(root)}")
@@ -83,6 +90,8 @@ def _validate_sources(root: Path) -> None:
                 )
         except (OSError, UnicodeError, ValueError) as exc:
             raise BackupError(f"documento-fonte inválido em {path.relative_to(root)}: {exc}") from exc
+    if blobs - referenced:
+        raise BackupError("há arquivo de recuperação sem descrição válida; nenhum backup foi declarado concluído")
 
 
 def _remote_uses_https(url: str) -> bool:

@@ -16,6 +16,13 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Adicionado
 
+- Arquivos de recuperação podem ser guardados pelo MCP com verificação de hash,
+  descrição pesquisável e conteúdo separado da busca. O backup confere os originais.
+- Leitura exata de fontes em lote, com continuação por caracteres e proteção contra
+  mistura de versões durante uma recuperação.
+- Diagnóstico agrupa falhas novas de leitura por uma impressão digital dos caminhos,
+  sem guardar seus nomes ou o conteúdo das chamadas.
+
 - Envio de imagens pelo MCP, inclusive pela CLI sem acesso ao painel, com
   conferência de integridade e reaproveitamento de imagens já guardadas.
 

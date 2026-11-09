@@ -17,7 +17,8 @@ from .performance import measure_performance
 from .restore import RestoreError, resolve_restore_source, restore_on_start
 from .web_server import start_dashboard
 from .topology import add_historical_source as add_topology_source, select_topology
-from .source_documents import read_source_markdown
+from .source_documents import read_source_markdown, read_source_batch as read_sources_batch
+from . import artifacts
 from .skills import read_skill, render_resolved_skill, resolve_skill_chain, skill_catalog
 from .usage import UsageRecorder
 from .errors import guard_tool
@@ -35,6 +36,8 @@ FULL_USAGE_GUIDE = (
     "a ferramenta recusa sobrescrever um arquivo diferente sem expected_sha256 igual ao hash atual. "
     "As mudanças vão para os dados canônicos da OMM (backup), não para o repositório da aplicação. "
     "Para guardar documentos completos em sources/, use import_source. Informe o escopo, o caminho original relativo e o texto Markdown. "
+    "Para recuperação programática de fontes, use read_source_batch com janelas de caracteres e SHA esperado; devolva ao modelo apenas recibos, salvo conteúdo necessário ao raciocínio. "
+    "Para novos arquivos opacos de recuperação, use upload_artifact/read_artifact; a descrição é pesquisável e os bytes ficam fora do índice. Não migre nem apague acervo anterior automaticamente. "
     "A ferramenta não sobrescreve fontes existentes e bloqueia credenciais detectadas; depois da importação, a busca lexical as encontra automaticamente. "
     "Para corrigir uma fonte, leia o trecho com read_source e use patch_source para pequenas trocas literais, com o sha256 integral atual. Use replace_source para conteúdo inteiro ou delete_source para remover; versões antigas podem permanecer no Git. "
     "Para redigir trechos pequenos sem reenviar o texto sensível, use redact_source_spans com o sha256 da fonte e posições de linha/coluna com tamanho esperado. "
@@ -229,6 +232,22 @@ def build_server(root: Path):
     def read_source(path: str, start_line: int, end_line: int) -> dict:
         """Lê um trecho pequeno e devolve o sha256 integral para edições protegidas."""
         return read_source_markdown(omm.root, path, start_line, end_line)
+
+    @measured_tool()
+    def read_source_batch(requests: list[dict]) -> dict:
+        """Lê até 8 trechos exatos: requests=[{path, start_char:0, max_chars:8000, expected_sha256:hash opcional}]. Até 65536 caracteres no lote; use next_start_char e preserve o SHA entre páginas."""
+        return read_sources_batch(omm.root, requests)
+
+    @measured_tool()
+    def upload_artifact(scope: str, content_base64: str, sha256: str,
+                        title: str, description: str, origin: str) -> dict:
+        """Guarda até 8 MiB de bytes imutáveis para recuperação, com descrição pesquisável; não extrai nem executa."""
+        return omm.import_artifact(scope, content_base64, sha256, title, description, origin)
+
+    @measured_tool()
+    def read_artifact(path: str, expected_sha256: str, offset: int = 0, max_bytes: int = 65536) -> dict:
+        """Recupera bytes por páginas base64, verificando o original; não é validação de funcionamento do projeto."""
+        return artifacts.read_artifact(omm.root, path, expected_sha256, offset, max_bytes)
 
     @measured_tool()
     def import_source(scope: str, relative_path: str, content: str) -> dict:

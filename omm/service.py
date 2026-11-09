@@ -29,6 +29,7 @@ from .store import CanonicalStore
 from .locking import data_lock
 from .timing import PhaseTimings, timed_phase
 from . import image_evidence
+from . import artifacts
 
 
 MAX_SEARCH_RESULTS = 100
@@ -426,6 +427,15 @@ class OMM:
             self._ensure_index_current()
             with self.timings.measure("lexical_source_query"):
                 return self.retriever.search_sources(query, max(0, min(int(limit), MAX_SOURCE_RESULTS)), scopes)
+
+    def import_artifact(self, scope: str, content_base64: str, sha256: str,
+                        title: str, description: str, origin: str) -> dict:
+        with self.operation_lock():
+            result = artifacts.upload_artifact(self.root, scope, content_base64, sha256,
+                                               title, description, origin)
+            if result["status"] == "imported":
+                self._index_schema_valid = False
+            return result
 
     def import_image(self, scope: str, raw: bytes, metadata: dict) -> dict:
         with self.operation_lock():
