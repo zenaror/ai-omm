@@ -182,18 +182,37 @@ class OMM:
             raise ValueError("A anotação parece conter uma senha, token ou chave privada. "
                              "Remova a credencial e tente novamente; a OMM não a salvou.")
 
+    def _note_index_snapshot(self) -> tuple[bool, bool]:
+        """Inspect the disposable index without rebuilding unrelated sources."""
+        try:
+            available = self.retriever.has_expected_schema()
+            return available, available and self.retriever.indexed_fingerprint() == self._canonical_fingerprint()
+        except (OSError, sqlite3.Error, RuntimeError):
+            return False, False
+
+    def _index_written_notes(self, records: list[MemoryRecord], available: bool,
+                             was_current: bool) -> bool:
+        """Best-effort indexing after canonical writes; never certify stale sources."""
+        index_pending = True
+        if available:
+            try:
+                self.retriever.add_many(records, self._canonical_fingerprint() if was_current else None)
+                index_pending = not was_current
+            except (OSError, sqlite3.Error, RuntimeError):
+                logging.getLogger(__name__).warning("omm_note_index_pending records=%d", len(records))
+        self._last_index_check = 0.0 if index_pending else monotonic()
+        self._index_file_signature = self._current_index_file_signature()
+        self._index_schema_valid = available
+        return index_pending
+
     def remember(self, record: MemoryRecord) -> None:
         self._validate_memory_input(record)
         with self.operation_lock():
-            self._ensure_index_current(force=True)
             if record.workstream_id and not any(item["id"] == record.workstream_id for item in self.store.workstreams()):
                 raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
+            available, was_current = self._note_index_snapshot()
             self.store.append(record)
-            self.retriever.add(record)
-            self.retriever.set_indexed_fingerprint(self._canonical_fingerprint())
-            self._last_index_check = monotonic()
-            self._index_file_signature = self._current_index_file_signature()
-            self._index_schema_valid = True
+            self._index_written_notes([record], available, was_current)
 
     def propose_memory(self, record: MemoryRecord) -> dict:
         """Queue a proposed memory for human review with lexical near-match hints."""
@@ -249,12 +268,7 @@ class OMM:
                 # Approval is canonical work, not an occasion to reindex every source.
                 # Never advance an already-stale fingerprint: source searches must still
                 # notice changes even when note rows have been updated incrementally.
-                available, was_current = False, False
-                try:
-                    available = self.retriever.has_expected_schema()
-                    was_current = available and self.retriever.indexed_fingerprint() == self._canonical_fingerprint()
-                except (OSError, sqlite3.Error, RuntimeError):
-                    pass
+                available, was_current = self._note_index_snapshot()
                 existing = dict(self._records_by_id())
                 additions = []
                 for record in records:
@@ -266,31 +280,16 @@ class OMM:
             if updates:
                 self.store.update_proposals(updates, "accepted" if approve else "rejected")
             if approve and pending:
-                index_pending = True
-                if available:
-                    try:
-                        indexed = list({r.id: existing[r.id] for r in records}.values())
-                        self.retriever.add_many(indexed, self._canonical_fingerprint() if was_current else None)
-                        index_pending = not was_current
-                    except (OSError, sqlite3.Error, RuntimeError):
-                        # The accepted notes are safe in Git-backed files. A subsequent
-                        # search/rebuild repairs the disposable index, including retries.
-                        logging.getLogger(__name__).warning("omm_approval_index_pending records=%d", len(records))
-                self._last_index_check = 0.0 if index_pending else monotonic()
-                self._index_file_signature = self._current_index_file_signature()
-                self._index_schema_valid = available
+                indexed = list({r.id: existing[r.id] for r in records}.values())
+                index_pending = self._index_written_notes(indexed, available, was_current)
             return {"reviewed": len(pending), "skipped": len(selected) - len(pending),
                     "index_pending": index_pending}
 
     def set_record_status(self, record_id: str, status: str) -> MemoryRecord:
         with self.operation_lock():
-            self._ensure_index_current(force=True)
+            available, was_current = self._note_index_snapshot()
             record = self.store.update_record_status(record_id, status)
-            self.retriever.add(record)
-            self.retriever.set_indexed_fingerprint(self._canonical_fingerprint())
-            self._last_index_check = monotonic()
-            self._index_file_signature = self._current_index_file_signature()
-            self._index_schema_valid = True
+            self._index_written_notes([record], available, was_current)
             return record
 
     def delete_retracted_record(self, record_id: str) -> MemoryRecord:

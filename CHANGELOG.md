@@ -7,6 +7,9 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- Guardar uma memória ou mudar seu status não espera pela reconstrução das
+  fontes da busca. Se a busca falhar, o dado salvo continua preservado.
+
 - Aprovar sugestões guarda as decisões sem esperar pela reconstrução de todas
   as fontes da busca. O painel informa quando a busca ainda precisa atualizar
   e mantém um aviso visível se não conseguir carregar os dados.
