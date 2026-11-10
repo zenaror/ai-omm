@@ -81,6 +81,25 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             replace_source_markdown(self.root, receipt["path"], "replace", "0" * 64)
 
+    def test_unset_or_zero_quota_allows_storage_beyond_old_default(self):
+        folder = self.root / "sources/demo/artifacts"
+        folder.mkdir(parents=True)
+        # Sparse size-only fixtures simulate an existing corpus without writing
+        # hundreds of MiB. This test does not claim these are recoverable archives.
+        for i in range(65):
+            with (folder / (f"{i:064x}" + ".blob")).open("wb") as f:
+                f.truncate(8 * 1024 * 1024)
+        for value in (None, "0"):
+            with self.subTest(value=value), patch.dict(os.environ):
+                if value is None:
+                    os.environ.pop("OMM_ARTIFACT_SCOPE_QUOTA_MIB", None)
+                else:
+                    os.environ["OMM_ARTIFACT_SCOPE_QUOTA_MIB"] = value
+                self.assertEqual(self.upload(title=f"default {value}")["status"], "imported")
+        with patch.dict(os.environ, {"OMM_ARTIFACT_SCOPE_QUOTA_MIB": "512"}):
+            with self.assertRaises(ValueError):
+                self.upload(b"new payload", title="Explicit cap")
+
     def test_symlinks_corruption_and_orphans_block_backup(self):
         outside = self.base / "outside"
         outside.mkdir()

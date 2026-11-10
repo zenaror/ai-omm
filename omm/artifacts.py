@@ -113,16 +113,16 @@ def upload_artifact(root, scope, content_base64, sha256, title, description, ori
             if stream.read(MAX_BYTES + 1) != raw:
                 raise ValueError("O arquivo existente não confere; nada foi sobrescrito.")
     try:
-        quota = int(os.getenv("OMM_ARTIFACT_SCOPE_QUOTA_MIB", "512"))
-        if not 1 <= quota <= 16384:
+        quota = int(os.getenv("OMM_ARTIFACT_SCOPE_QUOTA_MIB", "0"))
+        if quota < 0:
             raise ValueError
     except ValueError as exc:
-        raise ValueError("OMM_ARTIFACT_SCOPE_QUOTA_MIB precisa estar entre 1 e 16384.") from exc
+        raise ValueError("OMM_ARTIFACT_SCOPE_QUOTA_MIB precisa ser zero (sem cota) ou um inteiro positivo.") from exc
     folder = target.parent
     blobs = list(folder.glob("*.blob"))
     if any(p.is_symlink() or not p.is_file() for p in blobs):
         raise ValueError("Arquivos de recuperação não podem usar links simbólicos.")
-    if sum(p.stat().st_size for p in blobs) + (0 if exists else len(raw)) > quota * 1024 * 1024:
+    if quota and sum(p.stat().st_size for p in blobs) + (0 if exists else len(raw)) > quota * 1024 * 1024:
         raise ValueError("A cota de arquivos de recuperação deste projeto foi atingida.")
     rendered = _render(card)
     if len(rendered) > MAX_CARD_BYTES:

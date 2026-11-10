@@ -256,12 +256,34 @@ recebe `scope`, `content_base64`, `sha256`, `title`, `description` e `origin`.
 O servidor confere o hash; não sobrescreve originais. Repetir os mesmos bytes e
 metadados devolve o recibo existente. Outra descrição reutiliza os mesmos bytes.
 
-Cada arquivo aceita até **8 MiB**. Há cota padrão de **512 MiB por projeto**,
-ajustável com `OMM_ARTIFACT_SCOPE_QUOTA_MIB` (1 a 16.384). Para arquivo maior,
+Cada arquivo aceita até **8 MiB** por envio. **Não há cota total por projeto
+por padrão.** `OMM_ARTIFACT_SCOPE_QUOTA_MIB` ausente ou igual a `0` deixa o
+armazenamento sujeito ao espaço disponível. Um inteiro positivo em MiB impõe
+uma cota somente por configuração explícita do operador. Para arquivo maior,
 divida por script e guarde um manifesto com ordem, hashes e instrução de montagem.
 O conteúdo binário não é analisado para remover segredos: confira o que está
 autorizado a guardar antes do envio. Imagens devem continuar usando seu fluxo
 próprio, que confere o formato e oferece prévias.
+
+No Portainer, se quiser definir essa opção, a variável precisa estar tanto na
+configuração da stack quanto na lista de ambiente do serviço. No serviço `omm`
+do exemplo deste repositório (ou `ct-omm`, caso esse seja o nome na sua stack), use:
+
+```yaml
+OMM_ARTIFACT_SCOPE_QUOTA_MIB: ${OMM_ARTIFACT_SCOPE_QUOTA_MIB:-0}
+```
+
+E nas variáveis da stack:
+
+```dotenv
+OMM_ARTIFACT_SCOPE_QUOTA_MIB=0
+```
+
+Use a imagem que aceita zero como ausência de cota e recrie o serviço pela
+stack para aplicar. Se sua configuração antiga ainda define um valor positivo,
+ele continua sendo respeitado: remova-o ou use zero para desativar. A opção não
+reserva disco nem limita o crescimento do histórico Git. A regra é a mesma para
+imagens, com `OMM_IMAGE_SCOPE_QUOTA_MIB=0` por padrão.
 
 O recibo contém `path`, `sha256` e `bytes`. Passe o caminho `.artifact.md` e esse
 hash a `read_artifact` como `expected_sha256`. `offset` começa em zero;

@@ -51,6 +51,25 @@ class ImageEvidenceTests(unittest.TestCase):
         self.meta = {"title": "Tela de teste", "description": "Quadrado sintético verde; não é evidência de hardware.",
                      "origin": "Fixture do teste", "evidence_type": "synthetic", "limitations": "Sem aparelho real."}
 
+    def test_unset_or_zero_quota_allows_images_beyond_old_default(self):
+        folder = self.root / "sources/demo/evidence"
+        folder.mkdir(parents=True)
+        # Sparse fixtures model accumulated sizes, not valid image evidence.
+        for i in range(27):
+            with (folder / f"size-fixture-{i}.png").open("wb") as f:
+                f.truncate(10 * 1024 * 1024)
+        for value in (None, "0"):
+            with self.subTest(value=value), patch.dict(os.environ):
+                if value is None:
+                    os.environ.pop("OMM_IMAGE_SCOPE_QUOTA_MIB", None)
+                else:
+                    os.environ["OMM_IMAGE_SCOPE_QUOTA_MIB"] = value
+                result = self.omm.import_image("demo", image_bytes(), {**self.meta, "title": f"default {value}"})
+                self.assertEqual(result["status"], "imported")
+        with patch.dict(os.environ, {"OMM_IMAGE_SCOPE_QUOTA_MIB": "256"}):
+            with self.assertRaises(ValueError):
+                self.omm.import_image("demo", image_bytes(color="blue"), self.meta)
+
     def test_formats_roundtrip_search_preview_and_original_hash(self):
         for fmt in ("PNG", "JPEG", "WEBP"):
             with self.subTest(fmt=fmt):

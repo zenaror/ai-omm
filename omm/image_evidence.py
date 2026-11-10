@@ -212,16 +212,16 @@ def import_image(root: Path, scope: str, raw: bytes, metadata: dict) -> dict:
     if exists and blob.read_bytes() != raw:
         raise ValueError("O arquivo existente não corresponde ao hash; nenhuma evidência foi sobrescrita.")
     try:
-        quota = int(os.getenv("OMM_IMAGE_SCOPE_QUOTA_MIB", "256"))
-        if not 1 <= quota <= 16384:
+        quota = int(os.getenv("OMM_IMAGE_SCOPE_QUOTA_MIB", "0"))
+        if quota < 0:
             raise ValueError
     except ValueError as exc:
-        raise ValueError("OMM_IMAGE_SCOPE_QUOTA_MIB precisa estar entre 1 e 16384.") from exc
+        raise ValueError("OMM_IMAGE_SCOPE_QUOTA_MIB precisa ser zero (sem cota) ou um inteiro positivo.") from exc
     scope_root = safe_path(root, f"sources/{scope}/evidence").parent
     images = [p for p in scope_root.rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES]
     if any(p.is_symlink() for p in images):
         raise ValueError("Há link simbólico nas imagens do projeto.")
-    if sum(p.stat().st_size for p in images if p.is_file()) + (0 if exists else len(raw)) > quota * 1024 * 1024:
+    if quota and sum(p.stat().st_size for p in images if p.is_file()) + (0 if exists else len(raw)) > quota * 1024 * 1024:
         raise ValueError("Limite de imagens deste projeto atingido. Revise os arquivos ou ajuste a cota no servidor.")
     card = {**core, "recorded_at": datetime.now(timezone.utc).isoformat()}
     rendered = _render(card)

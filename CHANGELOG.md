@@ -7,6 +7,10 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- Imagens e arquivos de recuperação deixam de ter cotas totais por projeto
+  impostas por padrão. Cotas passam a ser opcionais, configuradas explicitamente;
+  zero desativa a cota. O Compose e os exemplos seguem o mesmo padrão.
+
 - Guardar uma memória ou mudar seu status não espera pela reconstrução das
   fontes da busca. Se a busca falhar, o dado salvo continua preservado.
 

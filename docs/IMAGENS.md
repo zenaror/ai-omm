@@ -144,9 +144,11 @@ Não é necessário criar outro volume. Os originais e as descrições ficam em
 `sources/<projeto>/evidence/` e entram no mecanismo de backup Git já configurado.
 “Guardado na OMM” não significa “já enviado ao backup remoto”.
 
-O limite padrão é 256 MiB de imagens atuais por projeto. A variável opcional
-`OMM_IMAGE_SCOPE_QUOTA_MIB` muda esse limite. Ele não limita o histórico Git;
-coleções grandes podem aumentar bastante o tamanho do backup.
+Não há cota total de imagens por projeto por padrão. `OMM_IMAGE_SCOPE_QUOTA_MIB`
+ausente ou igual a `0` deixa o armazenamento sujeito ao espaço disponível.
+Um valor inteiro positivo impõe uma cota explícita em MiB somente se o operador
+quiser configurá-la. Os limites técnicos por imagem continuam valendo.
+Essa opção não reserva disco nem limita o histórico Git.
 
 Para remover, use o painel ou `delete_image_evidence`, passando o SHA-256 atual
 da **descrição**, obtido na listagem. A remoção preserva um original ainda usado
