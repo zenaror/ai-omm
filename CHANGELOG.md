@@ -7,6 +7,9 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- A reconstrução semântica pelo terminal libera as gravações da OMM enquanto
+  calcula os embeddings. Reconstruções simultâneas aguardam em uma trava própria.
+
 - Imagens e arquivos de recuperação deixam de ter cotas totais por projeto
   impostas por padrão. Cotas passam a ser opcionais, configuradas explicitamente;
   zero desativa a cota. O Compose e os exemplos seguem o mesmo padrão.

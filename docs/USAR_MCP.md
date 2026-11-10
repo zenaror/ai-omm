@@ -102,6 +102,11 @@ Na primeira busca de cada escopo (global ou projeto), a OMM prepara os vetores d
 
 Quando habilitada, o agente pode chamar `semantic_search` se a busca comum não encontrar algo que parece estar na memória. Na linha de comando, use `omm semantic-search "sua pergunta"`; para refazer manualmente o índice, use `omm semantic-rebuild`. Esses comandos da CLI esperam a reconstrução terminar.
 
+Durante os cálculos no Ollama, memórias, handoffs e uploads continuam podendo
+ser gravados. Se dois comandos tentarem reconstruir o índice ao mesmo tempo,
+um aguarda o outro sem bloquear essas gravações. Mudanças feitas durante o
+cálculo ficam para a próxima atualização da busca; não são descartadas.
+
 Para atualizar só um projeto, use `omm --root /data semantic-rebuild --scope meu-projeto`.
 Repita `--scope` para escolher outros projetos no mesmo comando. Sem `--scope`,
 o comando continua reconstruindo tudo. Os vetores dos outros projetos são

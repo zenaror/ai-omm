@@ -542,12 +542,30 @@ class OMM:
         """Create the optional vector index from canonical records and source files."""
         if self.semantic is None:
             raise SemanticSearchError("Busca semântica desligada. Configure OMM_SEMANTIC_ENABLED=true e os dados do serviço de embeddings.")
-        with self.operation_lock():
-            self._ensure_index_current()
-            fingerprint = self._canonical_fingerprint()
-            if scopes is not None and (not scopes or any(not isinstance(scope, str) or not scope.strip() for scope in scopes)):
-                raise ValueError("Informe ao menos um escopo não vazio, ou omita --scope para reconstruir tudo.")
-            return self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root), fingerprint, scopes=scopes)
+        if scopes is not None and (not scopes or any(not isinstance(scope, str) or not scope.strip() for scope in scopes)):
+            raise ValueError("Informe ao menos um escopo não vazio, ou omita --scope para reconstruir tudo.")
+        return self._rebuild_semantic_snapshot(scopes)
+
+    def _rebuild_semantic_snapshot(self, scopes: list[str] | None, progress=None,
+                                   only_stale: bool = False) -> int:
+        assert self.semantic is not None
+        # Serialize CLI/background builders across processes without holding the
+        # canonical-data lock during slow HTTP/GPU work. Lock ordering matters:
+        # a waiting builder must not block ordinary notes, handoffs or uploads.
+        with data_lock(self.root / ".omm" / "semantic-build"):
+            with self.operation_lock():
+                self._ensure_index_current()
+                fingerprint = self._canonical_fingerprint()
+                selected = self._semantic_stale_scopes(fingerprint, scopes) if only_stale else scopes
+                if selected == []:
+                    if progress is not None:
+                        progress(0, 0)
+                    return 0
+                records = list(self.store.records())
+                chunks = read_source_chunks(self.root)
+            # Changes after this snapshot deliberately leave its fingerprint
+            # stale. The next semantic search can reconcile them; no lost notes.
+            return self.semantic.rebuild(records, chunks, fingerprint, selected, progress)
 
     def _semantic_stale_scopes(self, fingerprint: str, scopes: list[str] | None) -> list[str] | None:
         assert self.semantic is not None
@@ -599,19 +617,7 @@ class OMM:
 
             def run() -> None:
                 try:
-                    # Snapshot canonical inputs briefly, then release the shared
-                    # data lock before the slow network/GPU embedding batches.
-                    with self.operation_lock():
-                        self._ensure_index_current()
-                        fingerprint = self._canonical_fingerprint()
-                        current_scopes = self._semantic_stale_scopes(fingerprint, scopes)
-                        if current_scopes == []:
-                            with self._semantic_job_lock:
-                                self._semantic_job_state.update(status="ready", completed=0, total=0)
-                            return
-                        records = list(self.store.records())
-                        chunks = read_source_chunks(self.root)
-                    self.semantic.rebuild(records, chunks, fingerprint, current_scopes, update_progress)
+                    self._rebuild_semantic_snapshot(scopes, update_progress, only_stale=True)
                 except Exception as exc:  # status carries a safe class name, not endpoint details
                     with self._semantic_job_lock:
                         self._semantic_job_state.update(status="failed", error_type=type(exc).__name__)
@@ -682,9 +688,10 @@ class OMM:
             self._ensure_index_current()
             fingerprint = self._canonical_fingerprint()
             stale_scopes = self._semantic_stale_scopes(fingerprint, scopes)
-            if stale_scopes is None or stale_scopes:
-                self.semantic.rebuild(list(self.store.records()), read_source_chunks(self.root),
-                                      fingerprint, stale_scopes)
+            if stale_scopes == []:
+                return self._semantic_query_current(query, mode, limit, scopes)
+        self._rebuild_semantic_snapshot(scopes, only_stale=True)
+        with self.operation_lock():
             return self._semantic_query_current(query, mode, limit, scopes)
 
     def source_chunk_count(self) -> int:
