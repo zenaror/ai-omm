@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import errno
 import os
 from pathlib import Path
 import threading
@@ -9,6 +10,32 @@ from typing import Iterator
 
 
 _local = threading.local()
+
+
+def data_lock_held(root: Path) -> bool:
+    """Probe a shared lock without waiting or relying on container-specific PIDs."""
+    resolved = root.resolve()
+    if str(resolved) in getattr(_local, "locks", {}):
+        return True
+    metadata = resolved / ".git"
+    path = metadata / "omm-write.lock" if metadata.is_dir() else resolved / ".omm-write.lock"
+    if not path.is_file():
+        return False
+    with path.open("r+", encoding="utf-8") as stream:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                return True
+            raise
+        _release(stream)
+    return False
 
 
 def _acquire(stream) -> None:

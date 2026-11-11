@@ -1,14 +1,17 @@
 """Optional semantic index backed by a local Ollama embedding endpoint."""
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import heapq
 import json
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import sqlite3
 import struct
+import uuid
 from collections.abc import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -112,10 +115,10 @@ class OllamaSemanticIndex:
             normalized.append([value / norm for value in values])
         return normalized
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self, timeout: float = 5) -> sqlite3.Connection:
         if not self.path.is_file():
             raise SemanticSearchError("O índice de busca ainda não existe; inicie a OMM antes da busca semântica.")
-        db = sqlite3.connect(self.path, timeout=5)
+        db = sqlite3.connect(self.path, timeout=timeout)
         db.execute("CREATE TABLE IF NOT EXISTS semantic_vectors ("
                    "kind TEXT NOT NULL, id TEXT NOT NULL, scope TEXT NOT NULL, title TEXT NOT NULL, "
                    "content_hash TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', "
@@ -140,11 +143,29 @@ class OllamaSemanticIndex:
         except sqlite3.Error:
             return None
 
+    def build_progress(self) -> dict | None:
+        """Read durable progress, including work by a separate CLI process."""
+        if not self.path.is_file():
+            return None
+        try:
+            with sqlite3.connect(self.path, timeout=5) as db:
+                row = db.execute("SELECT value FROM semantic_metadata WHERE key='build_progress'").fetchone()
+            state = json.loads(row[0]) if row else None
+            return state if isinstance(state, dict) and state.get("model") == self.model else None
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _write_progress(db: sqlite3.Connection, state: dict) -> None:
+        state["updated_at"] = datetime.now(timezone.utc).isoformat()
+        db.execute("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES('build_progress',?)",
+                   (json.dumps(state, sort_keys=True),))
+
     def rebuild(self, records: list[MemoryRecord], chunks: list[SourceChunk], fingerprint: str,
                 scopes: list[str] | None = None,
                 progress: Callable[[int, int], None] | None = None) -> int:
         selected_scopes = None if scopes is None else set(scopes)
-        items: list[tuple[str, str, str, str, str, str, int | None, int | None]] = []
+        items: list[tuple] = []
         items.extend(("memory", record.id, record.scope, record.title,
                       record.title + "\n" + record.content + "\n" + " ".join(record.tags),
                       record.source, None, None)
@@ -154,84 +175,135 @@ class OllamaSemanticIndex:
                       chunk.heading + "\n" + chunk.content, chunk.path,
                       chunk.start_line, chunk.end_line) for chunk in chunks if
                      (selected_scopes is None or chunk.scope in selected_scopes))
-        # Reuse unchanged vectors when only one memory or source has changed.
-        # This keeps ordinary updates from sending the whole collection again.
-        cached: dict[tuple[str, str], tuple[tuple, list[float]]] = {}
-        if self.path.is_file():
-            try:
-                with self._connect() as db:
+        state = {"generation": uuid.uuid4().hex, "model": self.model, "scopes": scopes,
+                 "status": "building", "completed": 0, "total": len(items),
+                 "embedded": 0, "reused": 0, "error_type": None,
+                 "started_at": datetime.now(timezone.utc).isoformat()}
+        with closing(self._connect(timeout=30)) as db, db:
+            db.execute("CREATE TABLE IF NOT EXISTS semantic_checkpoints ("
+                       "model TEXT NOT NULL, generation TEXT NOT NULL, kind TEXT NOT NULL, "
+                       "id TEXT NOT NULL, scope TEXT NOT NULL, title TEXT NOT NULL, "
+                       "content_hash TEXT NOT NULL, source TEXT NOT NULL, start_line INTEGER, "
+                       "end_line INTEGER, vector BLOB NOT NULL, PRIMARY KEY(model,kind,id))")
+            self._write_progress(db, state)
+        dimension = None
+        try:
+            if progress is not None:
+                progress(0, len(items))
+            # Only one batch of decoded vectors lives in Python. Each successful
+            # batch is committed separately; a killed process loses at most its
+            # unfinished batch, never the previously published search index.
+            for offset in range(0, len(items), 32):
+                batch = items[offset:offset + 32]
+                predicates = " OR ".join("(kind=? AND id=?)" for _ in batch)
+                keys = tuple(value for item in batch for value in item[:2])
+                cached = {}
+                with closing(self._connect(timeout=30)) as db, db:
                     model_row = db.execute("SELECT value FROM semantic_metadata WHERE key='model'").fetchone()
                     if model_row and model_row[0] == self.model:
-                        sql = ("SELECT kind,id,scope,title,content_hash,content,source,start_line,end_line,vector "
-                               "FROM semantic_vectors")
-                        params: tuple[str, ...] = ()
-                        if selected_scopes is not None:
-                            if not selected_scopes:
-                                sql += " WHERE 0"
-                            else:
-                                sql += " WHERE scope IN (" + ",".join("?" for _ in selected_scopes) + ")"
-                                params = tuple(sorted(selected_scopes))
-                        for row in db.execute(sql, params):
-                            try:
-                                saved_content = row[4] or row[5]
-                                cached_item = (*row[:4], saved_content, *row[6:9])
-                                cached[(row[0], row[1])] = (cached_item, _unpack_vector(row[9]))
-                            except (TypeError, ValueError, json.JSONDecodeError, struct.error):
-                                continue
-            except sqlite3.Error:
-                pass
-        vectors: list[list[float] | None] = [None] * len(items)
-        pending: list[tuple[int, tuple]] = []
-        for position, item in enumerate(items):
-            previous = cached.get((item[0], item[1]))
-            if previous and self._cached_item_matches(previous[0], item):
-                vectors[position] = previous[1]
-            else:
-                pending.append((position, item))
-        completed = len(items) - len(pending)
-        if progress is not None:
-            progress(completed, len(items))
-        for offset in range(0, len(pending), 32):
-            batch = pending[offset:offset + 32]
-            embedded = self._embed([item[4] for _, item in batch])
-            for (position, _), vector in zip(batch, embedded):
-                vectors[position] = vector
-            completed += len(batch)
-            if progress is not None:
-                progress(completed, len(items))
-        if any(vector is None for vector in vectors):
-            raise SemanticSearchError("O índice semântico ficou incompleto; tente reconstruí-lo novamente.")
-        complete_vectors = [vector for vector in vectors if vector is not None]
-        with self._connect() as db:
-            if selected_scopes is None:
-                db.execute("DELETE FROM semantic_vectors")
-                db.execute("DELETE FROM semantic_metadata WHERE key='fingerprint' OR key LIKE 'scope:%'")
-            elif selected_scopes:
-                placeholders = ",".join("?" for _ in selected_scopes)
-                db.execute(f"DELETE FROM semantic_vectors WHERE scope IN ({placeholders})",
-                           tuple(sorted(selected_scopes)))
-                db.executemany("DELETE FROM semantic_metadata WHERE key=?",
-                               [("scope:" + scope,) for scope in selected_scopes])
-            db.executemany(
-                "INSERT INTO semantic_vectors(kind,id,scope,title,content_hash,content,source,start_line,end_line,vector) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?)",
-                [(item[0], item[1], item[2], item[3], _content_hash(item[4]), "",
-                  item[5], item[6], item[7], _pack_vector(vector))
-                 for item, vector in zip(items, complete_vectors)],
-            )
-            db.execute("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES('model',?)",
-                       (self.model,))
-            if selected_scopes is None:
-                db.execute("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES('fingerprint',?)",
-                           (fingerprint,))
+                        rows = db.execute(
+                            "SELECT kind,id,scope,title,content_hash,content,source,start_line,end_line,vector "
+                            "FROM semantic_vectors WHERE " + predicates, keys)
+                        for row in rows:
+                            cached[(row[0], row[1])] = ((*row[:4], row[4] or row[5], *row[6:9]), row[9])
+                    rows = db.execute(
+                        "SELECT kind,id,scope,title,content_hash,source,start_line,end_line,vector "
+                        "FROM semantic_checkpoints WHERE model=? AND (" + predicates + ")",
+                        (self.model, *keys))
+                    for row in rows:
+                        saved = (row[:8], row[8])
+                        item = next(item for item in batch if item[:2] == row[:2])
+                        if self._cached_item_matches(saved[0], item):
+                            cached[(row[0], row[1])] = saved
+                packed: list[bytes | None] = [None] * len(batch)
+                pending = []
+                for position, item in enumerate(batch):
+                    previous = cached.get(item[:2])
+                    if previous and self._cached_item_matches(previous[0], item):
+                        try:
+                            vector = _unpack_vector(previous[1])
+                            packed[position] = _pack_vector(vector)
+                        except (TypeError, ValueError, struct.error, SemanticSearchError):
+                            packed[position] = None
+                    if packed[position] is None:
+                        pending.append((position, item))
+                if pending:
+                    embedded = self._embed([item[4] for _, item in pending])
+                    for (position, _), vector in zip(pending, embedded):
+                        packed[position] = _pack_vector(vector)
+                for vector in packed:
+                    if vector is None:
+                        raise SemanticSearchError("O lote semântico ficou incompleto.")
+                    size = len(vector) // 4
+                    if dimension is not None and size != dimension:
+                        raise SemanticSearchError("O serviço mudou a dimensão dos vetores durante a reconstrução.")
+                    dimension = size
+                next_state = dict(state)
+                next_state["completed"] += len(batch)
+                next_state["embedded"] += len(pending)
+                next_state["reused"] += len(batch) - len(pending)
+                with closing(self._connect(timeout=30)) as db, db:
+                    db.executemany(
+                        "INSERT OR REPLACE INTO semantic_checkpoints "
+                        "(model,generation,kind,id,scope,title,content_hash,source,start_line,end_line,vector) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        [(self.model, state["generation"], *item[:4], _content_hash(item[4]),
+                          *item[5:], vector) for item, vector in zip(batch, packed)])
+                    self._write_progress(db, next_state)
+                state = next_state
+                if progress is not None:
+                    progress(state["completed"], len(items))
+            with closing(self._connect(timeout=30)) as db, db:
+                # Publish atomically only the exact generation prepared above.
+                count = db.execute("SELECT count(*) FROM semantic_checkpoints WHERE generation=?",
+                                   (state["generation"],)).fetchone()[0]
+                if count != len(items):
+                    raise SemanticSearchError("Os checkpoints semânticos ficaram incompletos.")
+                old_model = db.execute("SELECT value FROM semantic_metadata WHERE key='model'").fetchone()
+                if selected_scopes is None or not old_model or old_model[0] != self.model:
+                    db.execute("DELETE FROM semantic_vectors")
+                    db.execute("DELETE FROM semantic_metadata WHERE key='fingerprint' OR key LIKE 'scope:%'")
+                elif selected_scopes:
+                    placeholders = ",".join("?" for _ in selected_scopes)
+                    db.execute(f"DELETE FROM semantic_vectors WHERE scope IN ({placeholders})",
+                               tuple(sorted(selected_scopes)))
+                    db.executemany("DELETE FROM semantic_metadata WHERE key=?",
+                                   [("scope:" + scope,) for scope in selected_scopes])
+                db.execute(
+                    "INSERT INTO semantic_vectors(kind,id,scope,title,content_hash,content,source,start_line,end_line,vector) "
+                    "SELECT kind,id,scope,title,content_hash,'',source,start_line,end_line,vector "
+                    "FROM semantic_checkpoints WHERE generation=?", (state["generation"],))
+                db.execute("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES('model',?)", (self.model,))
+                if selected_scopes is None:
+                    db.execute("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES('fingerprint',?)", (fingerprint,))
+                    ready_scopes = {item[2] for item in items}
+                else:
+                    ready_scopes = selected_scopes
                 db.executemany("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES(?,?)",
-                               [("scope:" + scope, fingerprint)
-                                for scope in sorted({item[2] for item in items})])
+                               [("scope:" + scope, fingerprint) for scope in sorted(ready_scopes)])
                 db.execute("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES('storage_version',?)",
                            (_STORAGE_VERSION,))
-            else:
-                db.executemany("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES(?,?)",
-                               [("scope:" + scope, fingerprint) for scope in sorted(selected_scopes)])
+                if selected_scopes is None:
+                    db.execute("DELETE FROM semantic_checkpoints")
+                elif selected_scopes:
+                    # Also retire abandoned entries for removed inputs/older
+                    # models in completed scopes, preserving other scopes' work.
+                    placeholders = ",".join("?" for _ in selected_scopes)
+                    db.execute(f"DELETE FROM semantic_checkpoints WHERE scope IN ({placeholders})",
+                               tuple(sorted(selected_scopes)))
+                state["status"] = "completed"
+                self._write_progress(db, state)
+        except BaseException as exc:
+            # Persist no endpoint, input text or exception message. Failure to
+            # write this diagnostic must not mask the original error.
+            state["status"] = "failed"
+            state["error_type"] = type(exc).__name__
+            try:
+                with closing(self._connect(timeout=30)) as db, db:
+                    self._write_progress(db, state)
+            except sqlite3.Error:
+                pass
+            raise
         return len(items)
 
     @staticmethod

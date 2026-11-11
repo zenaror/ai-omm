@@ -26,7 +26,7 @@ from .source_documents import (SourceHit, delete_source_markdown, import_source_
 from .scope_merge import ScopeMergeError, apply_scope_merge, build_scope_merge_plan
 from .semantic import OllamaSemanticIndex, SemanticSearchError
 from .store import CanonicalStore
-from .locking import data_lock
+from .locking import data_lock, data_lock_held
 from .timing import PhaseTimings, timed_phase
 from . import image_evidence
 from . import artifacts
@@ -538,13 +538,13 @@ class OMM:
         with self.operation_lock():
             return save_role_file(self.root, name, content, expected_sha256)
 
-    def rebuild_semantic(self, scopes: list[str] | None = None) -> int:
+    def rebuild_semantic(self, scopes: list[str] | None = None, progress=None) -> int:
         """Create the optional vector index from canonical records and source files."""
         if self.semantic is None:
             raise SemanticSearchError("Busca semântica desligada. Configure OMM_SEMANTIC_ENABLED=true e os dados do serviço de embeddings.")
         if scopes is not None and (not scopes or any(not isinstance(scope, str) or not scope.strip() for scope in scopes)):
             raise ValueError("Informe ao menos um escopo não vazio, ou omita --scope para reconstruir tudo.")
-        return self._rebuild_semantic_snapshot(scopes)
+        return self._rebuild_semantic_snapshot(scopes, progress)
 
     def _rebuild_semantic_snapshot(self, scopes: list[str] | None, progress=None,
                                    only_stale: bool = False) -> int:
@@ -637,16 +637,37 @@ class OMM:
             return {"enabled": False, "status": "disabled", "indexed_entries": 0}
         with self._semantic_job_lock:
             job = dict(self._semantic_job_state)
-        if job.get("status") == "building":
-            return {"enabled": True, **job, "indexed_entries": self.semantic.chunk_count()}
+        saved = self.semantic.build_progress()
+        active = data_lock_held(self.root / ".omm" / "semantic-build")
+        if job.get("status") == "building" or active:
+            if saved and saved.get("status") == "building":
+                current_job = saved
+            elif job.get("status") == "building":
+                current_job = job
+            else:
+                current_job = {"completed": 0, "total": None, "scopes": None}
+            return {"enabled": True, **current_job, "status": "building",
+                    "indexed_entries": self.semantic.chunk_count(),
+                    "checkpointed": saved is not None and saved.get("status") == "building"}
         with self.operation_lock():
             fingerprint = self._canonical_fingerprint()
             current = (self.semantic.indexed_fingerprint() == fingerprint if scopes is None else
                        all(self.semantic.indexed_fingerprint(scope) == fingerprint for scope in scopes))
             entries = self.semantic.chunk_count()
-        status = "ready" if current else ("failed" if job.get("status") == "failed" else "stale")
+        unfinished = saved and saved.get("status") == "building"
+        failed = job.get("status") == "failed" or (saved and saved.get("status") == "failed")
+        if current:
+            status = "ready"
+        elif unfinished:
+            status = "interrupted"
+        elif failed:
+            status = "failed"
+        else:
+            status = "stale"
         return {"enabled": True, "status": status, "scopes": scopes,
-                "indexed_entries": entries, "error_type": job.get("error_type")}
+                "indexed_entries": entries,
+                "error_type": saved.get("error_type") if saved else job.get("error_type"),
+                "last_build": saved}
 
     def compact_semantic_index(self) -> dict[str, int | str | bool]:
         """Compact only the disposable SQLite index; canonical memories stay untouched."""

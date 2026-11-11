@@ -159,6 +159,18 @@ Os escopos são barreiras de recuperação. Uma chamada limitada a um projeto po
 
 Na interface MCP, a geração de vetores desatualizados roda em segundo plano para não prender a chamada por minutos nem bloquear as demais operações da OMM. Nesse primeiro pedido, `semantic_search` retorna `status=building`, sem resultados semânticos; `semantic_index_status` mostra o progresso em lotes. O agente pode usar a busca lexical enquanto espera e repetir a consulta quando o estado for `ready`. O CLI mantém a reconstrução explícita síncrona.
 
+Reconstrutores CLI/MCP compartilham uma trava própria, separada da trava dos dados
+canônicos. `semantic_checkpoints` guarda lotes preparados no SQLite derivado;
+`semantic_metadata.build_progress` guarda contadores e estado entre processos.
+Reutilização confere modelo, identidade, conteúdo e metadados da entrada. Uma
+geração nova percorre o snapshot atual e só publica seus próprios itens, numa
+transação: vetores e fingerprint anteriores não são substituídos parcialmente.
+Falha/morte do processo preserva lotes já commitados, inclusive se o estado ainda
+dizia `building`; a consulta testa a trava sem esperar e informa `interrupted`
+quando não há reconstrutor ativo. O cálculo mantém somente um lote de vetores
+decodificados em memória. Checkpoints são descartáveis junto do índice e não
+entram na memória canônica ou no backup Git dos dados.
+
 Cada vetor armazenado já está normalizado; o produto interno equivale à similaridade de cosseno. A implementação varre linearmente os vetores do tipo e escopo pedidos, usando um heap limitado a `k` itens para manter os melhores resultados. Assim, textos completos dos candidatos não são carregados todos na memória e não é necessário ordenar todo o conjunto, embora o custo de comparação continue O(N·d), onde N é o número de vetores no escopo e d a dimensão. Uma coleção muito grande poderá justificar índice ANN (por exemplo, HNSW), sem mudar a fonte canônica.
 
 `OMM_EMBEDDING_TIMEOUT` limita cada chamada ao serviço, com padrão de 120 segundos e teto interno também limitado. Os vetores dependem do modelo e do conteúdo; trocar o modelo invalida a identidade do índice semântico. Remover `.omm/index.sqlite3` elimina os vetores, não os dados. Uma nova busca ou `semantic-rebuild` os calcula novamente. `omm semantic-compact` converte índices antigos para o formato compacto sem chamar o serviço de embeddings e executa `VACUUM` para devolver páginas livres ao arquivo; ele só altera o índice derivado. Na configuração Compose, o Ollama permanece numa rede interna, com cloud desligada; textos são enviados ao endpoint configurado, então apontá-lo para outro host muda o limite de privacidade.

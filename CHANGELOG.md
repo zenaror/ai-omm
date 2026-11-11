@@ -7,6 +7,10 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- A preparação da busca semântica salva cada lote concluído e reaproveita o
+  trabalho após uma interrupção. O terminal mostra o andamento, que também pode
+  ser consultado de outra sessão, e o cálculo usa menos memória para os vetores.
+
 - A reconstrução semântica pelo terminal libera as gravações da OMM enquanto
   calcula os embeddings. Reconstruções simultâneas aguardam em uma trava própria.
 

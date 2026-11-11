@@ -323,6 +323,16 @@ Veja se a busca por assunto já está pronta.
 
 **O que acontece e o que conferir:** Consulta. Se estiver building, ainda está preparando; quando estiver ready, repita semantic_search. Evite consultar repetidamente sem dar tempo para o trabalho avançar.
 
+O progresso salvo também aparece quando a reconstrução foi iniciada pelo
+terminal em outro processo. `completed` e `total` mostram o avanço do trabalho;
+`embedded` e `reused` separam cálculos novos de reaproveitamento. Não são tokens
+ou custos. `checkpointed` indica que há progresso salvo da execução em andamento.
+Se aparecer `interrupted` ou `failed`, os detalhes ficam em `last_build`: não
+considere isso uma conclusão. A reconstrução seguinte reaproveita os lotes válidos.
+Um índice anterior pronto pode continuar disponível mesmo após uma tentativa
+interrompida; nesse caso, confira também o último trabalho. Os contadores são
+do snapshot que está sendo preparado, não de possíveis arquivos novos posteriores.
+
 **Exemplo de parâmetros:**
 
 ```json

@@ -6,9 +6,11 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+from time import monotonic
 
 from .models import KINDS, MemoryRecord
 from .service import OMM
+from .semantic import SemanticSearchError
 from .diagnostics import diagnose
 from .history import accept_history, list_history_imports, show_history_import, stage_history
 from .copilot_archive import import_copilot_chat
@@ -83,6 +85,8 @@ def parser() -> argparse.ArgumentParser:
     semantic.add_argument("--scope", action="append", help="limitar aos projetos informados")
     semantic_rebuild = sub.add_parser("semantic-rebuild", help="recriar o índice semântico local")
     semantic_rebuild.add_argument("--scope", action="append", help="recriar só este projeto; pode repetir. Sem esta opção, recria tudo")
+    semantic_status = sub.add_parser("semantic-status", help="ver o progresso salvo sem iniciar reconstrução")
+    semantic_status.add_argument("--scope", action="append", help="conferir estes projetos")
     sub.add_parser("semantic-compact", help="reduzir o espaço do índice semântico local sem recalcular vetores")
     context = sub.add_parser("context", help="preparar um resumo para passar a um assistente")
     context.add_argument("query")
@@ -266,7 +270,26 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(omm.semantic_search(args.query, args.mode, args.limit, args.scope),
                          ensure_ascii=False, indent=2))
     elif args.command == "semantic-rebuild":
-        print(f"Índice semântico recriado: {omm.rebuild_semantic(args.scope)} itens")
+        print("Preparando a reconstrução. Se outra estiver em execução, este comando aguardará.",
+              file=sys.stderr, flush=True)
+        last_print = None
+        def progress(completed: int, total: int) -> None:
+            nonlocal last_print
+            now = monotonic()
+            if last_print is None or completed == total or now - last_print >= 15:
+                percent = completed * 100 / total if total else 100
+                print(f"Índice semântico: {completed}/{total} itens preparados ({percent:.1f}%). "
+                      "Lotes concluídos ficam salvos para retomada.", file=sys.stderr, flush=True)
+                last_print = now
+        try:
+            count = omm.rebuild_semantic(args.scope, progress)
+        except (KeyboardInterrupt, OSError, sqlite3.Error, SemanticSearchError) as exc:
+            print(f"Reconstrução interrompida ({type(exc).__name__}). Os lotes já salvos serão "
+                  "reaproveitados ao repetir o comando.", file=sys.stderr, flush=True)
+            return 130 if isinstance(exc, KeyboardInterrupt) else 1
+        print(f"Índice semântico recriado: {count} itens")
+    elif args.command == "semantic-status":
+        print(json.dumps(omm.semantic_index_status(args.scope), ensure_ascii=False, indent=2))
     elif args.command == "semantic-compact":
         try:
             result = omm.compact_semantic_index()
