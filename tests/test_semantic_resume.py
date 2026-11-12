@@ -62,6 +62,54 @@ class SemanticResumeTests(unittest.TestCase):
         self.assertEqual(self.omm.semantic.build_progress()["completed"], 32)
         self.assertNotIn("private endpoint", json.dumps(self.omm.semantic.build_progress()))
 
+    def test_lexical_probe_under_exclusive_lock_preserves_batches_and_resume(self):
+        self.fail_after_batch()
+        index = self.omm.semantic.path
+        inode = index.stat().st_ino
+        holder = sqlite3.connect(index)
+        holder.execute("BEGIN EXCLUSIVE")
+        try:
+            with self.assertRaises(sqlite3.OperationalError) as raised:
+                self.omm._ensure_index_current(force=True)
+            self.assertEqual(raised.exception.sqlite_errorcode, sqlite3.SQLITE_BUSY)
+            self.assertEqual(index.stat().st_ino, inode)
+        finally:
+            holder.rollback()
+            holder.close()
+        self.assertEqual(self.omm.semantic.build_progress()["completed"], 32)
+        self.assertEqual(self.vector_ids(), {self.records[0].id})
+        embedded = []
+        def count(request, timeout):
+            embedded.extend(json.loads(request.data)["input"])
+            return self.embed(request, timeout)
+        # A normal lexical query after the lock clears must still work.
+        self.assertEqual(len(self.omm.search("Needle000")), 1)
+        with patch("omm.semantic.urlopen", side_effect=count):
+            self.assertEqual(self.omm.rebuild_semantic(), 70)
+        self.assertEqual(len(embedded), 38)
+        self.assertEqual(self.omm.semantic.build_progress()["reused"], 32)
+
+    def test_non_corruption_errors_do_not_discard_index(self):
+        inode = self.omm.semantic.path.stat().st_ino
+        for method in ("has_expected_schema", "indexed_fingerprint"):
+            for code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_IOERR, None):
+                with self.subTest(method=method, code=code):
+                    error = sqlite3.OperationalError("fixture")
+                    if code is not None:
+                        error.sqlite_errorcode = code
+                    with patch.object(self.omm.retriever, method, side_effect=error), \
+                            patch.object(self.omm.retriever, "discard_index") as discard:
+                        with self.assertRaises(sqlite3.OperationalError):
+                            self.omm._ensure_index_current(force=True)
+                        discard.assert_not_called()
+                    self.assertEqual(self.omm.semantic.path.stat().st_ino, inode)
+
+    def test_confirmed_corrupt_database_is_still_rebuilt_from_canonical_data(self):
+        self.omm.semantic.path.write_bytes(b"not a SQLite database")
+        self.omm._ensure_index_current(force=True)
+        self.assertEqual(len(self.omm.search("Needle000")), 1)
+        self.assertEqual(len(list(self.omm.store.records())), 70)
+
     def test_killed_cli_restarts_from_durable_batches_and_reports_to_other_processes(self):
         script = '''import io,json,sys,time
 from pathlib import Path

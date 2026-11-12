@@ -7,6 +7,9 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- Uma ocupação temporária do banco de busca não é mais tratada como corrupção.
+  Isso preserva os lotes semânticos salvos enquanto outra operação usa o banco.
+
 - A preparação da busca semântica salva cada lote concluído e reaproveita o
   trabalho após uma interrupção. O terminal mostra o andamento, que também pode
   ser consultado de outra sessão, e o cálculo usa menos memória para os vetores.

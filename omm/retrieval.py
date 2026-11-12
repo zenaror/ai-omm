@@ -12,6 +12,12 @@ MAX_QUERY_CHARS = 1200
 MAX_QUERY_TERMS = 64
 
 
+def is_index_corruption(exc: sqlite3.Error) -> bool:
+    """Only confirmed corruption permits discarding the shared search database."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    return code is not None and (code & 0xff) in {sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB}
+
+
 def _search_terms(query: str) -> list[str]:
     """Keep FTS queries small and interpret them as plain words."""
     return list(dict.fromkeys(re.findall(r"[\w]+", query[:MAX_QUERY_CHARS], flags=re.UNICODE)))[:MAX_QUERY_TERMS]
@@ -89,8 +95,13 @@ class SQLiteFTSRetriever:
                     and {"id", "scope", "path", "heading", "content", "start_line", "end_line"} <= source_columns
                     and {"key", "value"} <= metadata_columns
                 )
-        except sqlite3.Error:
-            return False
+        except sqlite3.Error as exc:
+            if is_index_corruption(exc):
+                return False
+            # Busy/locked/I/O failures do not establish a broken schema. This
+            # database also holds durable semantic batches: never unlink it
+            # merely because another process is committing a batch.
+            raise
 
     def discard_index(self) -> None:
         """Remove only the derived search database, including SQLite sidecars."""

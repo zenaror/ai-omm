@@ -17,7 +17,7 @@ from .adapters import GenericMarkdownAdapter
 from .continuity import checkpoint_metadata, validate_repository, validate_revision
 from .errors import OMMError
 from .models import MemoryRecord
-from .retrieval import Retriever, SQLiteFTSRetriever
+from .retrieval import Retriever, SQLiteFTSRetriever, is_index_corruption
 from .redaction import find_credentials
 from .registries import save_role as save_role_file, save_skill as save_skill_file
 from .source_documents import (SourceHit, delete_source_markdown, import_source_markdown,
@@ -155,7 +155,9 @@ class OMM:
         schema_valid = self.retriever.has_expected_schema()
         try:
             index_changed = not schema_valid or self.retriever.indexed_fingerprint() != fingerprint
-        except (OSError, sqlite3.Error):
+        except sqlite3.Error as exc:
+            if not is_index_corruption(exc):
+                raise
             schema_valid = False
             index_changed = True
         if not schema_valid:
