@@ -144,7 +144,8 @@ with patch('omm.semantic.urlopen',side_effect=embed):
         finally:
             child.kill()
             stdout, stderr = child.communicate(timeout=3)
-        self.assertIn("0/70", stderr)
+        self.assertIn("Conferindo 70 itens", stderr)
+        self.assertIn("não apaga o índice anterior", stderr)
         self.assertNotIn("recriado:", stdout)
         self.assertEqual(OMM(self.root).semantic_index_status()["status"], "interrupted")
         result = subprocess.run([sys.executable, "-m", "omm", "--root", str(self.root),
@@ -263,3 +264,16 @@ with patch('omm.semantic.urlopen',side_effect=embed):
         self.assertNotIn("recriado:", stdout.getvalue())
         self.assertIn("retomada", stderr.getvalue())
         self.assertEqual(self.omm.semantic.build_progress()["completed"], 32)
+
+    def test_cli_reports_reused_and_new_items_separately_on_resume(self):
+        self.fail_after_batch()
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch("omm.semantic.urlopen", side_effect=self.embed), \
+                redirect_stdout(stdout), redirect_stderr(stderr):
+            result = main(["--root", str(self.root), "semantic-rebuild"])
+        self.assertIn(result, (None, 0))
+        self.assertIn("Conferindo 70 itens", stderr.getvalue())
+        self.assertNotIn("(0.0%)", stderr.getvalue())
+        self.assertIn("70/70 itens preparados (100.0%)", stderr.getvalue())
+        for output in (stdout.getvalue(), stderr.getvalue()):
+            self.assertIn("Reaproveitados: 32 | Novos/recalculados: 38", output)

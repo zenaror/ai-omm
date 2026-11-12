@@ -121,7 +121,11 @@ docker exec -i NOME_DO_CONTAINER python -m omm --root /data semantic-rebuild --s
 Troque o nome do container e do projeto. Isso é manutenção opcional: não grava
 memórias, não sincroniza o backup e não significa que o índice global ficou atualizado.
 
-O terminal mostra quantos itens foram preparados, o total e a porcentagem. Cada
+O terminal começa avisando que vai conferir os itens existentes, sem apagar o
+índice anterior. Durante o trabalho, mostra a quantidade preparada, o total e a
+porcentagem, separando **Reaproveitados** de **Novos/recalculados** (itens novos
+ou alterados que precisaram de cálculo nesta execução). O resumo final também
+traz essa divisão. Conferir o acervo novamente não significa recalcular tudo. Cada
 lote concluído fica salvo no índice local. Se o comando falhar ou for interrompido,
 repita o mesmo comando: ele reaproveita os lotes que ainda correspondem ao conteúdo
 e ao modelo usados. O lote que estava em cálculo pode precisar ser repetido.

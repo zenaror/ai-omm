@@ -7,6 +7,9 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- O terminal separa os itens reaproveitados dos novos ou recalculados durante
+  a preparação da busca semântica, sem sugerir que uma retomada apagou o índice.
+
 - Uma ocupação temporária do banco de busca não é mais tratada como corrupção.
   Isso preserva os lotes semânticos salvos enquanto outra operação usa o banco.
 

@@ -273,21 +273,43 @@ def main(argv: list[str] | None = None) -> int:
         print("Preparando a reconstrução. Se outra estiver em execução, este comando aguardará.",
               file=sys.stderr, flush=True)
         last_print = None
+        last_counts = None
         def progress(completed: int, total: int) -> None:
-            nonlocal last_print
+            nonlocal last_print, last_counts
             now = monotonic()
             if last_print is None or completed == total or now - last_print >= 15:
+                if completed == 0:
+                    print(f"Conferindo {total} itens. Os itens já salvos serão reaproveitados "
+                          "conforme forem conferidos; esta contagem não apaga o índice anterior.",
+                          file=sys.stderr, flush=True)
+                    last_print = now
+                    return
                 percent = completed * 100 / total if total else 100
+                if completed < total:
+                    percent = min(percent, 99.9)
+                # Read counters only when displaying progress, after the batch
+                # commit. Keep the two-argument callback used by other callers.
+                saved = omm.semantic.build_progress() if omm.semantic is not None else None
+                if saved is not None and saved.get("completed") == completed and saved.get("total") == total:
+                    last_counts = (saved["reused"], saved["embedded"])
+                    details = (f"Reaproveitados: {last_counts[0]} | "
+                               f"Novos/recalculados: {last_counts[1]}. ")
+                else:
+                    last_counts = None
+                    details = "Detalhamento dos contadores temporariamente indisponível. "
                 print(f"Índice semântico: {completed}/{total} itens preparados ({percent:.1f}%). "
-                      "Lotes concluídos ficam salvos para retomada.", file=sys.stderr, flush=True)
+                      + details + "Lotes concluídos ficam salvos para retomada.",
+                      file=sys.stderr, flush=True)
                 last_print = now
         try:
             count = omm.rebuild_semantic(args.scope, progress)
         except (KeyboardInterrupt, OSError, sqlite3.Error, SemanticSearchError) as exc:
-            print(f"Reconstrução interrompida ({type(exc).__name__}). Os lotes já salvos serão "
-                  "reaproveitados ao repetir o comando.", file=sys.stderr, flush=True)
+            print(f"Reconstrução interrompida ({type(exc).__name__}). Os lotes já salvos ficam "
+                  "disponíveis para retomada ao repetir o comando.", file=sys.stderr, flush=True)
             return 130 if isinstance(exc, KeyboardInterrupt) else 1
-        print(f"Índice semântico recriado: {count} itens")
+        details = (f" Reaproveitados: {last_counts[0]} | Novos/recalculados: {last_counts[1]}."
+                   if last_counts is not None else "")
+        print(f"Índice semântico recriado: {count} itens.{details}")
     elif args.command == "semantic-status":
         print(json.dumps(omm.semantic_index_status(args.scope), ensure_ascii=False, indent=2))
     elif args.command == "semantic-compact":
