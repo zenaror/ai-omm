@@ -5,7 +5,22 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ## [Não lançado]
 
+### Adicionado
+
+- O painel abre documentos por trechos e destaca os arquivos atualizados
+  recentemente, separando essa data da criação das anotações.
+- O diagnóstico de uso mostra faixas de duração das chamadas, com cobertura
+  explícita da medição, e sugere compactação quando há bastante espaço interno livre.
+
 ### Consertado
+
+- Erros de leitura orientam a descobrir o caminho correto ou ajustar os limites
+  do pedido, sem revelar os valores enviados.
+- A compactação aguarda uma reconstrução semântica para preservar seus lotes.
+
+- Pequenas alterações de documentos atualizam apenas os trechos afetados na
+  busca. Alterações em outro projeto não invalidam a busca semântica do projeto
+  já preparado; documentos removidos deixam de aparecer nas consultas.
 
 - O backup confirma o commit remoto após o envio, tenta novamente em falhas
   temporárias e distingue cópia local de backup enviado no painel. A espera

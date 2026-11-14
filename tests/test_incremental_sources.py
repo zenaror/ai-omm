@@ -61,3 +61,9 @@ class IncrementalSourcesTests(unittest.TestCase):
             db.execute('DROP TABLE source_manifest')
         self.o.rebuild()
         self.assertEqual(len(self.o.search_sources('Marker3')), 1)
+
+    def test_scoped_snapshot_uses_the_same_version_as_individual_checks(self):
+        self.o.store.append(MemoryRecord(kind='fact', title='Scoped', content='Scoped record', source='fixture', scope='demo'))
+        versions = self.o._scope_fingerprints(['demo', 'global', 'other'])
+        for scope, version in versions.items():
+            self.assertEqual(version, self.o._canonical_fingerprint([scope]))

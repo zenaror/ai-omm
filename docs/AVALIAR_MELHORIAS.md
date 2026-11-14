@@ -117,3 +117,45 @@ O mesmo nível de informação pode não estar disponível no aplicativo usado.
 A OMM não inventa contadores ausentes e não transforma caracteres divididos por
 quatro em tokens faturados. Não há coleta automática dos históricos privados
 ou das contas dos provedores nesta avaliação.
+
+## Comparar atualizações pequenas da busca
+
+Na pasta do código, execute `python3 benchmarks/incremental_eval.py`. O teste cria
+2.000 documentos inventados em uma pasta temporária, prepara a busca e mede uma
+alteração de um documento. Não lê projetos reais. Compare na mesma máquina;
+os tempos desse exemplo não são promessa de desempenho nem economia de tokens.
+
+A busca passa a reler apenas documentos novos ou alterados e remove os trechos
+dos documentos apagados. Na primeira atualização da versão, é necessário criar
+o controle dos arquivos. Vetores e lotes semânticos já salvos são preservados.
+Ainda há conferência dos metadados do acervo, mesmo em uma atualização pequena.
+Alterar outro projeto não invalida por si só os vetores do projeto consultado.
+As versões antigas serão reconhecidas como desatualizadas uma vez; o cálculo
+continua aproveitando vetores com o mesmo conteúdo.
+
+## Entender as esperas
+
+`usage_report` passa a mostrar faixas de duração por ferramenta e projeto. Os
+campos `p50_upper_ms` e `p95_upper_ms` são limites superiores de faixas, não tempos
+exatos. Por exemplo, 500 significa que o ponto medido caiu na faixa até 500 ms.
+O campo `observed_calls` mostra quantas chamadas têm essa medição; chamadas de
+versões anteriores não foram reconstruídas. `null` no limite superior significa
+que a faixa ultrapassou 120 segundos. Os tempos internos também podem se
+sobrepor e não devem ser somados como duração total de uma tarefa.
+
+## Saber quando compactar
+
+O relatório de desempenho mostra `index_pages.free_bytes_estimate` e
+`free_percent`: espaço interno que o banco pode reutilizar sem crescer. A sugestão
+`compaction_recommended` aparece a partir de 256 MiB e 25% livres. É uma sugestão,
+não uma falha nem uma limpeza automática.
+
+Em um período sem reconstrução semântica, execute no container da aplicação:
+
+```bash
+python -m omm --root /data semantic-compact
+```
+
+O comando aguarda uma reconstrução já em andamento antes de compactar. Enquanto
+compacta, operações podem esperar. Não interrompa um trabalho ativo só porque o
+arquivo ainda ocupa espaço; a compactação não altera memórias e fontes.

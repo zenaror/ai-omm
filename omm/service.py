@@ -132,6 +132,28 @@ class OMM:
             digest.update(f"\0{stat.st_size}\0{stat.st_mtime_ns}\0{stat.st_ctime_ns}\n".encode())
         return digest.hexdigest()
 
+    def _scope_fingerprints(self, scopes, records=None):
+        """One metadata walk for multiple scopes, including a full build snapshot."""
+        selected = set(scopes)
+        digests = {scope: hashlib.sha256(b"omm-index-v2\0scoped-v1\0") for scope in selected}
+        for record in sorted(self.store.records() if records is None else records, key=lambda r: r.id):
+            if record.scope in digests:
+                digests[record.scope].update((record.to_json() + "\n").encode("utf-8"))
+        source_root = self.root / "sources"
+        for path in sorted(source_root.rglob("*.md")) if source_root.is_dir() else []:
+            parts = path.relative_to(source_root).parts
+            scope = parts[0] if len(parts) > 1 else "global"
+            if scope not in digests or path.is_symlink() or not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except FileNotFoundError:
+                continue
+            digest = digests[scope]
+            digest.update(path.relative_to(self.root).as_posix().encode("utf-8"))
+            digest.update(f"\0{stat.st_size}\0{stat.st_mtime_ns}\0{stat.st_ctime_ns}\n".encode())
+        return {scope: digest.hexdigest() for scope, digest in digests.items()}
+
     @timed_phase("index_rebuild")
     def _rebuild_index(self, fingerprint: str | None = None) -> int:
         started = perf_counter()
@@ -577,7 +599,7 @@ class OMM:
                 chunks = (self.retriever.all_source_chunks(selected) if isinstance(self.retriever, SQLiteFTSRetriever)
                           else read_source_chunks(self.root))
                 ready = set(selected) if selected is not None else {r.scope for r in records} | {c.scope for c in chunks}
-                scope_fingerprints = {scope: self._canonical_fingerprint([scope]) for scope in ready}
+                scope_fingerprints = self._scope_fingerprints(ready, records)
             # Changes after this snapshot deliberately leave its fingerprint
             # stale. The next semantic search can reconcile them; no lost notes.
             return self.semantic.rebuild(records, chunks, fingerprint, selected, progress, scope_fingerprints)
@@ -586,8 +608,9 @@ class OMM:
         assert self.semantic is not None
         if scopes is None:
             return None if self.semantic.indexed_fingerprint() != fingerprint else []
+        current = self._scope_fingerprints(scopes)
         return sorted({scope for scope in scopes
-                       if self.semantic.indexed_fingerprint(scope) != self._canonical_fingerprint([scope])})
+                       if self.semantic.indexed_fingerprint(scope) != current[scope]})
 
     def _semantic_query_current(self, query: str, mode: str, limit: int,
                                 scopes: list[str] | None) -> dict[str, list[dict]]:

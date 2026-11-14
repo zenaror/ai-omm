@@ -42,6 +42,12 @@ As anotações, regras e passagens são arquivos normais dentro de `memory/` e f
 
 # Revisar documentos importados
 
-No painel, escolha um projeto e abra **Materiais disponíveis**. A lista permite remover uma fonte dos arquivos atuais da OMM. O sistema pede confirmação e confere se o arquivo continua igual ao que foi listado.
+No painel, escolha um projeto e abra **Materiais disponíveis**. Os cinco documentos com atualização de arquivo mais recente aparecem primeiro.
+**Abrir documento** mostra o texto por trechos, sem executar HTML contido nele.
+**Próximo trecho** continua a leitura; se o arquivo mudar, reabra o documento.
+A data “Arquivo atualizado em” vem do arquivo na OMM, inclusive após restaurações;
+não é a data da descoberta. “Anotação criada em” continua sendo a criação da nota.
+
+A lista completa também permite remover uma fonte dos arquivos atuais da OMM. O sistema pede confirmação e confere se o arquivo continua igual ao que foi listado.
 
 Remover uma fonte tira seu conteúdo das buscas atuais depois que o índice é reconstruído. **Isso não apaga versões antigas que já foram salvas no histórico do Git.** Se o documento só precisa de correção, use a ferramenta `replace_source` do MCP para salvar uma versão revisada no mesmo caminho.

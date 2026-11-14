@@ -4,7 +4,7 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import base64
 import binascii
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
@@ -23,6 +23,7 @@ from .sync import SyncError, sync_with_backup
 from .backup_worker import BackupError
 from .skills import resolve_skill_chain, skill_catalog
 from .errors import error_report
+from .source_documents import read_source_batch
 from .image_evidence import CARD_SUFFIX
 from .image_transfer import MAX_UPLOAD_BYTES, parse_upload
 
@@ -212,7 +213,9 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
                 project_sources.append({"path": relative, "title": first_heading,
                                         "image_evidence": path.name.endswith(CARD_SUFFIX),
                                         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                                        "bytes": path.stat().st_size})
+                                        "bytes": path.stat().st_size,
+                                        "file_modified_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()})
+            project_sources.sort(key=lambda item: (item["file_modified_at"], item["path"]), reverse=True)
         scoped_records = [r for r in active if r.scope == scope] if scope else []
         organization = {
             "scope": scope,
@@ -371,6 +374,20 @@ def make_handler(omm: OMM):
             if parsed.path in {"/app.js", "/styles.css"}:
                 content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
                 self._send(200, (web_root / parsed.path.lstrip("/")).read_bytes(), content_type)
+                return
+            if parsed.path == "/api/source":
+                params = parse_qs(parsed.query)
+                try:
+                    request = {"path": params.get("path", [""])[0],
+                               "start_char": int(params.get("start_char", ["0"])[0]),
+                               "max_chars": 16000}
+                    if "expected_sha256" in params:
+                        request["expected_sha256"] = params["expected_sha256"][0]
+                    self._send_json(200, read_source_batch(omm.root, [request]))
+                except (OSError, ValueError, TypeError) as exc:
+                    report = error_report(exc, "read_source_batch")["error"]
+                    status = 409 if report["code"] == "VERSION_CONFLICT" else (404 if report["code"] == "NOT_FOUND" else 400)
+                    self._send_json(status, {"error": report["message"], "recovery": report["recovery"]})
                 return
             if parsed.path == "/api/dashboard":
                 params = parse_qs(parsed.query)

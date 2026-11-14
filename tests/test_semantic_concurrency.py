@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from omm.models import MemoryRecord
 from omm.service import OMM
+from omm.locking import data_lock
 
 
 class SemanticConcurrencyTests(unittest.TestCase):
@@ -84,6 +85,25 @@ print('written')
                 self.assertEqual(self.omm.get_handoff("demo")["state"]["summary"], "Concurrent checkpoint")
                 self.assertTrue(self.omm.search("AfterNeedle", scopes=["demo"]))
                 self.assertNotEqual(self.omm.semantic.indexed_fingerprint(), self.omm._canonical_fingerprint())
+
+    def test_waiting_compaction_does_not_block_canonical_writes(self):
+        compacted, errors = Event(), []
+        def compact():
+            try:
+                self.omm.compact_semantic_index()
+            except Exception as error:
+                errors.append(error)
+        with patch.object(self.omm.semantic, "compact_storage", side_effect=lambda: compacted.set() or {}):
+            with data_lock(self.root / ".omm" / "semantic-build"):
+                worker = Thread(target=compact)
+                worker.start()
+                result = self.writer()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(compacted.is_set())
+            worker.join(3)
+            self.assertFalse(worker.is_alive())
+            self.assertTrue(compacted.is_set())
+            self.assertEqual(errors, [])
 
     def test_waiting_builder_does_not_take_data_lock_and_catches_new_sources(self):
         started, finish, errors = Event(), Event(), []
