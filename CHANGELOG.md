@@ -14,6 +14,10 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- A inicialização recupera transações interrompidas do SQLite quando há um
+  diário pendente, preservando os vetores e lotes salvos em vez de reiniciar
+  continuamente com erro de banco somente leitura.
+
 - Erros de leitura orientam a descobrir o caminho correto ou ajustar os limites
   do pedido, sem revelar os valores enviados.
 - A compactação aguarda uma reconstrução semântica para preservar seus lotes.

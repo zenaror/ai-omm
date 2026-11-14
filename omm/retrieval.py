@@ -79,31 +79,37 @@ class SQLiteFTSRetriever:
         return row[0] if row else None
 
     def has_expected_schema(self) -> bool:
-        """Check the disposable index without creating or repairing its tables."""
+        """Check tables; let SQLite recover a hot journal without recreating data."""
         if not self.path.is_file():
             return False
-        try:
-            uri = self.path.resolve().as_uri() + "?mode=ro"
-            with sqlite3.connect(uri, uri=True, timeout=1) as db:
-                tables = {row[0] for row in db.execute(
-                    "SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
-                if not {"records", "source_chunks", "index_metadata"} <= tables:
+        for attempt in range(2):
+            try:
+                uri = self.path.resolve().as_uri() + "?mode=ro"
+                with sqlite3.connect(uri, uri=True, timeout=1) as db:
+                    tables = {row[0] for row in db.execute(
+                        "SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
+                    if not {"records", "source_chunks", "index_metadata"} <= tables:
+                        return False
+                    record_columns = {row[1] for row in db.execute("PRAGMA table_info(records)")}
+                    source_columns = {row[1] for row in db.execute("PRAGMA table_info(source_chunks)")}
+                    metadata_columns = {row[1] for row in db.execute("PRAGMA table_info(index_metadata)")}
+                    return (
+                        {"id", "kind", "scope", "title", "content", "source", "tags"} <= record_columns
+                        and {"id", "scope", "path", "heading", "content", "start_line", "end_line"} <= source_columns
+                        and {"key", "value"} <= metadata_columns
+                    )
+            except sqlite3.Error as exc:
+                if attempt == 0 and getattr(exc, "sqlite_errorcode", None) == sqlite3.SQLITE_READONLY_ROLLBACK:
+                    # A hot rollback journal needs a writable connection to let
+                    # SQLite restore the last committed transaction. Never remove
+                    # the journal or discard saved semantic vectors/checkpoints.
+                    with sqlite3.connect(self.path.resolve().as_uri() + "?mode=rw", uri=True, timeout=30) as recovery:
+                        recovery.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+                    continue
+                if is_index_corruption(exc):
                     return False
-                record_columns = {row[1] for row in db.execute("PRAGMA table_info(records)")}
-                source_columns = {row[1] for row in db.execute("PRAGMA table_info(source_chunks)")}
-                metadata_columns = {row[1] for row in db.execute("PRAGMA table_info(index_metadata)")}
-                return (
-                    {"id", "kind", "scope", "title", "content", "source", "tags"} <= record_columns
-                    and {"id", "scope", "path", "heading", "content", "start_line", "end_line"} <= source_columns
-                    and {"key", "value"} <= metadata_columns
-                )
-        except sqlite3.Error as exc:
-            if is_index_corruption(exc):
-                return False
-            # Busy/locked/I/O failures do not establish a broken schema. This
-            # database also holds durable semantic batches: never unlink it
-            # merely because another process is committing a batch.
-            raise
+                # Busy, read-only permissions and I/O errors are not corruption.
+                raise
 
     def discard_index(self) -> None:
         """Remove only the derived search database, including SQLite sidecars."""
