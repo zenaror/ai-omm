@@ -9,8 +9,9 @@ import tempfile
 from datetime import datetime, timezone
 from urllib.parse import quote, urlsplit
 
-from .backup_worker import BackupError, CANONICAL_PATHS, _validate_memory, _validate_sources
+from .backup_worker import BackupError, CANONICAL_PATHS, _validate_memory, _validate_sources, _send_backup, _error_category
 from .locking import data_lock
+from .backup_state import backup_lock_root, write_backup_state
 
 
 class SyncError(RuntimeError):
@@ -89,7 +90,7 @@ def preview_sync(root: Path, remote: str = "origin", branch: str = "main",
     changed_paths = _working_tree_paths(root)
     ignored_generated = {".omm/index.sqlite3", ".omm-write.lock"}
     outside_paths = sorted(path for path in changed_paths
-                           if not _inside_canonical(path) and path not in ignored_generated)
+                           if not _inside_canonical(path) and path not in ignored_generated and not path.startswith(".omm/"))
     canonical_paths = sorted(path for path in changed_paths if _inside_canonical(path))
     blocking_reasons: list[str] = []
     if staged_paths:
@@ -384,8 +385,12 @@ def _sync_with_backup_locked(root: Path, remote: str = "origin", branch: str = "
         _validate_sources(root)
         _run(root, "-c", f"user.name={author_name}", "-c", f"user.email={author_email}",
              "commit", "-m", "chore(omm): sincronizar backup")
-    _credential_args(root, remote, remote_url, username, token,
-                     ["push", remote, f"HEAD:refs/heads/{branch}"])
+    target = _run(root, "rev-parse", "HEAD")
+    try:
+        _send_backup(root, remote, branch, remote_url, username, token, target)
+    except (BackupError, OSError) as exc:
+        write_backup_state(root, state="failed", error_category=_error_category(exc))
+        raise SyncError(str(exc)) from exc
     message = ("Sincronização concluída: alterações locais salvas" if local_saved else "Sincronização concluída") + \
         f"; {merged_conflicts} conflito(s) preservado(s)" + \
         (f"; {preserved_copies} cópia(s) local(is) em {recovery_manifest}"
@@ -408,7 +413,7 @@ def sync_with_backup_report(root: Path, remote: str = "origin", branch: str = "m
                             username: str = "", token: str = "", author_name: str = "OMM Backup",
                             author_email: str = "omm@localhost") -> dict[str, object]:
     """Run a Git sync and return fields suitable for scripts and monitoring."""
-    with data_lock(root):
+    with data_lock(backup_lock_root(root)), data_lock(root):
         return _sync_with_backup_locked(root, remote, branch, repository_url,
                                         username, token, author_name, author_email)
 

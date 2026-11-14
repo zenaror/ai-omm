@@ -151,7 +151,9 @@ function render(data) {
   const indexTime=s.index_updated_at?new Date(s.index_updated_at).toLocaleString("pt-BR"):"não criado";
   const backupTime=s.backup_commit_at?new Date(s.backup_commit_at).toLocaleString("pt-BR"):"nenhum commit encontrado";
   const freshness=s.index_current?"busca atualizada":"a busca precisa de atualização; suas anotações continuam guardadas";
-  $("health").textContent=`${freshness} (${indexTime}) · último commit dos dados: ${backupTime} · índice local: ${size(s.index_bytes||0)}`;
+  const backup=s.backup_status||{};
+  const remoteBackup=backup.state==="synced"?`envio remoto confirmado em ${new Date(backup.last_success_at).toLocaleString("pt-BR")}`:backup.state==="failed"?`envio remoto pendente (${backup.error_category||"falha"}); o commit local não confirma backup remoto`:backup.state==="sending"||backup.state==="retrying"?"envio remoto em andamento":backup.state==="local_only"?"backup somente local":"envio remoto ainda não verificado";
+  $("health").textContent=`${freshness} (${indexTime}) · último commit local: ${backupTime} · ${remoteBackup} · índice local: ${size(s.index_bytes||0)}`;
   const scopeSelect=$("scope"), old=scopeSelect.value; scopeSelect.replaceChildren(); addOption(scopeSelect,"","Todos os projetos");
   for(const scope of data.scopes) addOption(scopeSelect,scope,scope==="global"?"Conhecimento compartilhado":(data.scope_labels?.[scope]||scope));
   scopeSelect.value=data.scopes.includes(old)?old:"";

@@ -7,6 +7,10 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- O backup confirma o commit remoto após o envio, tenta novamente em falhas
+  temporárias e distingue cópia local de backup enviado no painel. A espera
+  da rede do backup automático não bloqueia novas memórias.
+
 - O terminal separa os itens reaproveitados dos novos ou recalculados durante
   a preparação da busca semântica, sem sugerir que uma retomada apagou o índice.
 

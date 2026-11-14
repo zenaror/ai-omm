@@ -218,6 +218,20 @@ O endereço pode apontar para GitHub, GitLab, Gitea ou outro servidor Git. Para 
 
 O serviço faz backup no horário definido por `OMM_GIT_BACKUP_SCHEDULE` (padrão: todo dia às 03:00, horário de São Paulo). Para conferir mensagens, use `docker compose logs -f omm-backup`.
 
+O painel distingue o último commit **local** do envio **confirmado no remoto**.
+O envio só é confirmado quando o Git remoto informa o mesmo identificador do
+commit enviado. Em falhas temporárias de conexão ou HTTP 502/503/504, o worker
+faz até três tentativas, esperando 5 e 10 segundos. Ele confere o remoto antes
+de reenviar: uma resposta de erro pode acontecer depois de o servidor aceitar
+o commit. Erros de autenticação ou conflito exigem correção, sem repetição cega.
+A espera da rede do backup automático não impede novas gravações de memória.
+
+Se o HTTP 504 persistir, confira o timeout e os logs do proxy e do servidor Git.
+Para envios grandes, pode ser necessário aumentar o tempo permitido nessa
+infraestrutura ou configurar uma rota Git/SSH direta autorizada. A aplicação não
+altera o proxy nem usa force-push para contornar a falha. Preserve os commits
+locais e confirme o identificador remoto depois da correção.
+
 Na primeira inicialização, o restore automático baixa os dados se a pasta estiver vazia. O índice de busca é recriado. Se os dados já existirem, a OMM não os substitui automaticamente.
 
 No painel, **Sincronizar backup** salva as mudanças locais e busca novidades. **Atualizar** apenas recarrega a página. Se uma mudança não puder ser juntada com segurança, a OMM preserva uma cópia em `memory/imports/sync-recovery/` para revisão.

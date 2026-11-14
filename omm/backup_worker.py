@@ -9,26 +9,31 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo
 from .locking import data_lock
+from .backup_state import write_backup_state, backup_lock_root
 from .image_evidence import CARD_SUFFIX, IMAGE_SUFFIXES, MAX_IMAGE_BYTES, inspect_image, read_image
 from . import artifacts
 
 CANONICAL_PATHS = ("memory", "skills", "sources")
 MAX_SOURCE_PDF_BYTES = 100 * 1024 * 1024
+_retry_sleep = time.sleep
 
 
 class BackupError(RuntimeError):
     pass
 
 
-def _git(root: Path, *args: str, check: bool = True, env: dict[str, str] | None = None) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), *args], text=True, capture_output=True,
-        check=False, env=env,
-    )
+def _git(root: Path, *args: str, check: bool = True, env: dict[str, str] | None = None, timeout: int = 1800) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), *args], text=True, capture_output=True,
+            check=False, env=env, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BackupError("tempo esgotado na operação Git") from exc
     if check and result.returncode:
         message = result.stderr.strip() or result.stdout.strip() or "falha no Git"
         raise BackupError(message)
@@ -102,7 +107,7 @@ def _remote_uses_https(url: str) -> bool:
 
 
 def _backup_once_locked(root: Path, remote: str, branch: str, push_enabled: bool, username: str, token: str,
-                author_name: str, author_email: str, repository_url: str = "") -> str:
+                author_name: str, author_email: str, repository_url: str = "") -> tuple[str, str, str]:
     """Commit canonical files when changed, then push the configured branch."""
     root = root.resolve()
     if _git(root, "rev-parse", "--is-inside-work-tree") != "true":
@@ -144,41 +149,91 @@ def _backup_once_locked(root: Path, remote: str, branch: str, push_enabled: bool
     else:
         outcome = "memória sem alterações"
 
-    if not push_enabled:
-        return outcome + "; salvo somente no Git local"
-    if _remote_uses_https(remote_url) and not token:
-        raise BackupError("commit salvo localmente; informe OMM_GIT_BACKUP_TOKEN para enviá-lo ao remoto HTTPS")
+    return outcome, _git(root, "rev-parse", "HEAD"), remote_url
 
-    push_args = ["push", remote, f"HEAD:refs/heads/{branch}"]
-    credential_file: str | None = None
+
+def _error_category(error: Exception) -> str:
+    text = str(error).lower()
+    if any(x in text for x in ("504", "502", "503", "timeout", "tempo esgotado", "disconnect", "hung up", "connection reset", "could not resolve", "failed to connect")):
+        return "transport"
+    if any(x in text for x in ("authentication", "permission denied", "token", "403", "401")):
+        return "authentication"
+    if any(x in text for x in ("non-fast-forward", "rejected", "fetch first")):
+        return "remote_conflict"
+    return "validation_or_git"
+
+
+def _send_backup(root, remote, branch, remote_url, username, token, target, attempts=3):
+    credential_file = None
+    prefix = []
     try:
-        if token:
+        if _remote_uses_https(remote_url) and not token:
+            raise BackupError("commit salvo localmente; informe OMM_GIT_BACKUP_TOKEN para envio HTTPS")
+        if token and _remote_uses_https(remote_url):
             fd, credential_file = tempfile.mkstemp(prefix="omm-git-credentials-")
             os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as credentials:
-                host = urlsplit(remote_url).hostname
-                credentials.write(f"https://{quote(username, safe='')}:{quote(token, safe='')}@{host}\n")
-            push_args = ["-c", f"credential.helper=store --file={credential_file}", *push_args]
-        _git(root, *push_args)
-    except (OSError, BackupError):
-        if staged:
-            outcome += "; o envio falhou e o commit continua local"
-        raise
+            url = urlsplit(remote_url)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(f"{url.scheme}://{quote(username, safe='')}:{quote(token, safe='')}@{url.netloc}\n")
+            prefix = ["-c", f"credential.helper=store --file={credential_file}"]
+        last_error = BackupError("não foi possível confirmar o envio remoto")
+        for attempt in range(1, attempts + 1):
+            write_backup_state(root, state="sending", attempt=attempt, local_head=target, error_category=None)
+            try:
+                # An earlier timed-out push may actually have reached the server.
+                listing = _git(root, *prefix, "ls-remote", "--heads", remote,
+                               f"refs/heads/{branch}", timeout=30)
+                remote_head = listing.split()[0] if listing else None
+                if remote_head != target:
+                    try:
+                        _git(root, *prefix, "push", remote, f"{target}:refs/heads/{branch}")
+                    except BackupError as exc:
+                        last_error = exc
+                    # Never infer delivery from the push's exit code or prose.
+                    listing = _git(root, *prefix, "ls-remote", "--heads", remote,
+                                   f"refs/heads/{branch}", timeout=30)
+                    remote_head = listing.split()[0] if listing else None
+                write_backup_state(root, remote_head=remote_head)
+                if remote_head == target:
+                    write_backup_state(root, state="synced", error_category=None,
+                                       last_success_at=datetime.now(timezone.utc).isoformat())
+                    return
+                if _error_category(last_error) != "transport":
+                    break
+            except BackupError as exc:
+                last_error = exc
+                if _error_category(exc) != "transport":
+                    break
+            if attempt < attempts:
+                write_backup_state(root, state="retrying", error_category=_error_category(last_error))
+                _retry_sleep(min(60, 5 * 2 ** (attempt - 1)))
+        raise last_error
     finally:
         if credential_file:
-            try:
-                os.unlink(credential_file)
-            except FileNotFoundError:
-                pass
-    return outcome + "; enviado ao remoto"
+            Path(credential_file).unlink(missing_ok=True)
 
 
 def backup_once(root: Path, remote: str, branch: str, push_enabled: bool, username: str, token: str,
                 author_name: str, author_email: str, repository_url: str = "") -> str:
-    """Commit/push canonical data while holding the shared OMM data lock."""
-    with data_lock(root):
-        return _backup_once_locked(root, remote, branch, push_enabled, username, token,
-                                   author_name, author_email, repository_url)
+    """Snapshot under the data lock; network waits never block memory writers."""
+    root = root.resolve()
+    with data_lock(backup_lock_root(root)):
+        write_backup_state(root, state="preparing", error_category=None,
+                           last_attempt_at=datetime.now(timezone.utc).isoformat())
+        try:
+            with data_lock(root):
+                outcome, target, remote_url = _backup_once_locked(
+                    root, remote, branch, push_enabled, username, token,
+                    author_name, author_email, repository_url)
+            write_backup_state(root, local_head=target)
+            if not push_enabled:
+                write_backup_state(root, state="local_only")
+                return outcome + "; salvo somente no Git local"
+            _send_backup(root, remote, branch, remote_url, username, token, target)
+            return outcome + "; enviado ao remoto"
+        except (OSError, BackupError) as exc:
+            write_backup_state(root, state="failed", error_category=_error_category(exc))
+            raise
 
 
 def _enabled(value: str) -> bool:

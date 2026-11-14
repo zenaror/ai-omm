@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from .service import OMM
 from .topology import TopologyError, load_topology
+from .backup_state import read_backup_state
 from .sync import SyncError, sync_with_backup
 from .backup_worker import BackupError
 from .skills import resolve_skill_chain, skill_catalog
@@ -246,6 +247,7 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
                 "index_bytes": index_bytes, "index_updated_at": index_updated_at,
                 "index_current": index_current,
                 "backup_commit_at": backup_commit_at,
+                "backup_status": read_backup_state(omm.root),
                 "source_chunk_count": source_chunk_count, "policy_count": len(policies),
                 "handoff_count": len(handoffs), "agent_count": len(agents),
                 "kinds": kinds, "scopes": by_scope,
@@ -453,18 +455,17 @@ def make_handler(omm: OMM):
                 return
             if urlsplit(self.path).path == "/api/sync":
                 try:
-                    with omm.operation_lock():
-                        result = sync_with_backup(
-                            omm.root,
-                            os.getenv("OMM_GIT_BACKUP_REMOTE", "origin"),
-                            os.getenv("OMM_GIT_BACKUP_BRANCH", "main"),
-                            os.getenv("OMM_GIT_BACKUP_REPOSITORY_URL", "").strip(),
-                            os.getenv("OMM_GIT_BACKUP_USERNAME", "x-access-token"),
-                            os.getenv("OMM_GIT_BACKUP_TOKEN", ""),
-                            os.getenv("OMM_GIT_BACKUP_AUTHOR_NAME", "OMM Backup"),
-                            os.getenv("OMM_GIT_BACKUP_AUTHOR_EMAIL", "omm@localhost"),
-                        )
-                        omm.rebuild()
+                    result = sync_with_backup(
+                        omm.root,
+                        os.getenv("OMM_GIT_BACKUP_REMOTE", "origin"),
+                        os.getenv("OMM_GIT_BACKUP_BRANCH", "main"),
+                        os.getenv("OMM_GIT_BACKUP_REPOSITORY_URL", "").strip(),
+                        os.getenv("OMM_GIT_BACKUP_USERNAME", "x-access-token"),
+                        os.getenv("OMM_GIT_BACKUP_TOKEN", ""),
+                        os.getenv("OMM_GIT_BACKUP_AUTHOR_NAME", "OMM Backup"),
+                        os.getenv("OMM_GIT_BACKUP_AUTHOR_EMAIL", "omm@localhost"),
+                    )
+                    omm.rebuild()
                     self._send_json(200, {"message": result})
                 except (SyncError, BackupError, OSError, ValueError) as exc:
                     self._send_json(409, {"error": str(exc)})
