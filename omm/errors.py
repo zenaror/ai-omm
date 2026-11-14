@@ -39,6 +39,18 @@ def error_report(error: Exception, operation: str) -> dict:
         else:
             code, message = "INTERNAL_ERROR", "A ferramenta encontrou uma falha interna."
             recovery = "Informe operação e código à administração, sem credenciais. Confira o estado antes de repetir."
+    # Fixed guidance only: never include the rejected value or exception text.
+    if not isinstance(error, OMMError):
+        if code == "NOT_FOUND" and operation in {"read_source", "read_source_batch"}:
+            recovery = "Use search_sources para localizar o caminho exato antes de ler novamente. Não repita o caminho ausente nem o substitua por um resumo."
+        elif code == "INVALID_ARGUMENT" and operation == "read_source":
+            recovery = "Peça até 80 linhas e 8000 caracteres. Para recuperar texto completo, use read_source_batch com o cursor devolvido e o SHA-256."
+        elif code == "INVALID_ARGUMENT" and operation == "read_source_batch":
+            recovery = "Envie de 1 a 8 requests: path, start_char >= 0 e max_chars de 1 a 32768; máximo 65536 caracteres no lote. Reutilize next_start_char e sha256 devolvidos."
+        elif code in {"NOT_FOUND", "INVALID_ARGUMENT"} and operation in {"get_skill", "get_role"}:
+            recovery = "Consulte list_skills ou list_roles e use o nome exato retornado antes de repetir a leitura."
+        elif code == "INVALID_ARGUMENT" and operation == "read_artifact":
+            recovery = "Consulte os metadados do arquivo e use seu SHA-256, offset em bytes e max_bytes permitido. Retome pelo cursor devolvido."
     return {"error": {"code": code, "operation": operation, "message": message,
                       "recovery": recovery, "retryable": False, "write_outcome": outcome}}
 

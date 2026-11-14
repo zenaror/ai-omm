@@ -166,6 +166,7 @@ def _error_category(error: Exception) -> str:
 def _send_backup(root, remote, branch, remote_url, username, token, target, attempts=3):
     credential_file = None
     prefix = []
+    write_backup_state(root, last_attempt_at=datetime.now(timezone.utc).isoformat())
     try:
         if _remote_uses_https(remote_url) and not token:
             raise BackupError("commit salvo localmente; informe OMM_GIT_BACKUP_TOKEN para envio HTTPS")

@@ -14,6 +14,7 @@ import sqlite3
 from time import perf_counter
 
 from .errors import error_report
+from .latency import BOUNDS_MS, bucket_index, distribution
 
 
 # Never store arbitrary exception codes, messages, arguments or class names.
@@ -50,6 +51,10 @@ class UsageRecorder:
             error_code TEXT NOT NULL, path_key TEXT NOT NULL, path_kind TEXT NOT NULL,
             request_count INTEGER NOT NULL, failures INTEGER NOT NULL,
             PRIMARY KEY(day,tool,scope,error_code,path_key,path_kind,request_count))""")
+        db.execute("""CREATE TABLE IF NOT EXISTS usage_latency_daily (
+            day TEXT NOT NULL, tool TEXT NOT NULL, scope TEXT NOT NULL,
+            bucket INTEGER NOT NULL, calls INTEGER NOT NULL,
+            PRIMARY KEY(day,tool,scope,bucket))""")
         return db
 
     @staticmethod
@@ -108,6 +113,7 @@ class UsageRecorder:
             db.execute("DELETE FROM usage_daily WHERE day < ?", (cutoff,))
             db.execute("DELETE FROM usage_errors_daily WHERE day < ?", (cutoff,))
             db.execute("DELETE FROM usage_source_failures_daily WHERE day < ?", (cutoff,))
+            db.execute("DELETE FROM usage_latency_daily WHERE day < ?", (cutoff,))
             known = db.execute("SELECT 1 FROM usage_daily WHERE scope=? LIMIT 1", (scope,)).fetchone()
             if not known and db.execute("SELECT COUNT(DISTINCT scope) FROM usage_daily").fetchone()[0] >= 128:
                 scope = "_other"
@@ -118,6 +124,9 @@ class UsageRecorder:
                 output_chars=output_chars+excluded.output_chars,
                 total_ms=total_ms+excluded.total_ms, max_ms=MAX(max_ms,excluded.max_ms)""",
                 (now.date().isoformat(), tool, scope, 1, int(failed), inputs, outputs, elapsed_ms, elapsed_ms))
+            db.execute("""INSERT INTO usage_latency_daily VALUES(?,?,?,?,1)
+                ON CONFLICT(day,tool,scope,bucket) DO UPDATE SET calls=calls+1""",
+                (now.date().isoformat(), tool, scope, bucket_index(elapsed_ms)))
             if failed and error_code is not None:
                 code = error_code if error_code in ERROR_CODES else "INTERNAL_ERROR"
                 db.execute("""INSERT INTO usage_errors_daily VALUES(?,?,?,?,1)
@@ -188,7 +197,9 @@ class UsageRecorder:
         result = {"enabled": self.enabled, "days": days, "retention_days": self.retention_days,
                   "timezone": "UTC", "transport": "MCP", "write_failures_since_start": self.write_failures,
                   "measurement": "Caracteres JSON e tempo interno; não mede pixels/imagens, tokens cobrados, cache, rede ou descrições das ferramentas.",
-                  "rows": [], "error_rows": [],
+                  "rows": [], "error_rows": [], "latency_rows": [],
+                  "latency_bounds_ms": [*BOUNDS_MS, None],
+                  "latency_measurement": "Faixas desde esta versão; não reconstitui chamadas antigas. p50/p95 são limites superiores de faixas, não percentis exatos; null na faixa final significa acima de 120000 ms.",
                   "source_error_rows": [], "source_errors_overflow": 0,
                   "source_error_measurement": "Amostra limitada a 200 grupos por dia, desde esta versão. path_key é SHA-256 do JSON compacto da lista ordenada de caminhos UTF-8; não guarda caminhos nem conteúdo. Lotes têm chave conjunta, não identificam qual item falhou. Não mede retrospectivamente falhas antigas.",
                   "error_measurement": "Categorias de falhas desde esta versão; falhas antigas não têm categoria. Sem mensagens de erro ou conteúdo das chamadas."}
@@ -215,6 +226,16 @@ class UsageRecorder:
                 result["rows"].append({"tool": tool, "scope": project,
                     "calls": calls, "failures": failures, "input_chars": inputs, "output_chars": outputs,
                     "mean_ms": round(total_ms / calls, 2), "max_ms": round(max_ms, 2)})
+            latency_sql = "SELECT tool,scope,bucket,SUM(calls) FROM usage_latency_daily WHERE day>=?"
+            if scope is not None:
+                latency_sql += " AND scope=?"
+            latency = {}
+            for tool, project, bucket, count in db.execute(latency_sql + " GROUP BY tool,scope,bucket", params):
+                latency.setdefault((tool, project), [0] * (len(BOUNDS_MS) + 1))[bucket] += count
+            groups = sorted(latency.items(), key=lambda item: (-sum(item[1]), item[0]))
+            result["latency_truncated"] = len(groups) > 50
+            result["latency_rows"] = [dict(tool=key[0], scope=key[1], **distribution(counts))
+                                      for key, counts in groups[:50]]
             # Include omitted groups in project totals and latency ranking.
             projects = {}
             for row in rows:
