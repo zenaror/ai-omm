@@ -255,7 +255,7 @@ class OMMWorkflowTests(unittest.TestCase):
                 self.assertEqual(semantic.semantic.chunk_count(), 2,
                                  "only the requested scope should be added to the semantic index")
                 self.assertEqual(semantic.semantic.indexed_fingerprint("demo"),
-                                 semantic._canonical_fingerprint())
+                                 semantic._canonical_fingerprint(["demo"]))
                 self.assertIsNone(semantic.semantic.indexed_fingerprint(),
                                   "a scoped index must not claim the full corpus is indexed")
                 other_result = semantic.semantic_search("another project scope", scopes=["other"])

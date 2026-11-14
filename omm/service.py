@@ -108,14 +108,21 @@ class OMM:
             self.store.initialize()
             self._ensure_index_current()
 
-    def _canonical_fingerprint(self) -> str:
+    def _canonical_fingerprint(self, scopes: list[str] | None = None) -> str:
         """Notice canonical edits without rereading unchanged document contents."""
         digest = hashlib.sha256(b"omm-index-v2\0")
-        candidates = [self.store.records_path]
+        selected = set(scopes) if scopes is not None else None
+        candidates = [self.store.records_path] if selected is None else []
+        if selected is not None:
+            digest.update(b"scoped-v1\0")
+            for record in sorted(self.store.records(), key=lambda r: r.id):
+                if record.scope in selected:
+                    digest.update((record.to_json() + "\n").encode("utf-8"))
         source_root = self.root / "sources"
         if source_root.is_dir():
             candidates.extend(path for path in source_root.rglob("*.md")
-                              if path.is_file() and not path.is_symlink())
+                              if path.is_file() and not path.is_symlink() and
+                              (selected is None or (path.relative_to(source_root).parts[0] if len(path.relative_to(source_root).parts) > 1 else "global") in selected))
         for path in sorted(candidates, key=lambda item: item.as_posix()):
             try:
                 stat = path.stat()
@@ -130,13 +137,16 @@ class OMM:
         started = perf_counter()
         records = list(self.store.records())
         signature = fingerprint or self._canonical_fingerprint()
-        chunks = read_source_chunks(self.root)
-        self.retriever.rebuild(records, chunks, signature)
+        if isinstance(self.retriever, SQLiteFTSRetriever):
+            self.retriever.refresh(records, self.root, signature)
+        else:
+            chunks = read_source_chunks(self.root)
+            self.retriever.rebuild(records, chunks, signature)
         elapsed = perf_counter() - started
         if elapsed >= 1:
             logging.getLogger(__name__).warning(
                 "omm_index_rebuild seconds=%.3f records=%d chunks=%d",
-                elapsed, len(records), len(chunks))
+                elapsed, len(records), self.retriever.source_chunk_count())
         self._last_index_check = monotonic()
         self._index_file_signature = self._current_index_file_signature()
         self._index_schema_valid = True
@@ -564,17 +574,20 @@ class OMM:
                         progress(0, 0)
                     return 0
                 records = list(self.store.records())
-                chunks = read_source_chunks(self.root)
+                chunks = (self.retriever.all_source_chunks(selected) if isinstance(self.retriever, SQLiteFTSRetriever)
+                          else read_source_chunks(self.root))
+                ready = set(selected) if selected is not None else {r.scope for r in records} | {c.scope for c in chunks}
+                scope_fingerprints = {scope: self._canonical_fingerprint([scope]) for scope in ready}
             # Changes after this snapshot deliberately leave its fingerprint
             # stale. The next semantic search can reconcile them; no lost notes.
-            return self.semantic.rebuild(records, chunks, fingerprint, selected, progress)
+            return self.semantic.rebuild(records, chunks, fingerprint, selected, progress, scope_fingerprints)
 
     def _semantic_stale_scopes(self, fingerprint: str, scopes: list[str] | None) -> list[str] | None:
         assert self.semantic is not None
         if scopes is None:
             return None if self.semantic.indexed_fingerprint() != fingerprint else []
         return sorted({scope for scope in scopes
-                       if self.semantic.indexed_fingerprint(scope) != fingerprint})
+                       if self.semantic.indexed_fingerprint(scope) != self._canonical_fingerprint([scope])})
 
     def _semantic_query_current(self, query: str, mode: str, limit: int,
                                 scopes: list[str] | None) -> dict[str, list[dict]]:
@@ -654,7 +667,7 @@ class OMM:
         with self.operation_lock():
             fingerprint = self._canonical_fingerprint()
             current = (self.semantic.indexed_fingerprint() == fingerprint if scopes is None else
-                       all(self.semantic.indexed_fingerprint(scope) == fingerprint for scope in scopes))
+                       not self._semantic_stale_scopes(fingerprint, scopes))
             entries = self.semantic.chunk_count()
         unfinished = saved and saved.get("status") == "building"
         failed = job.get("status") == "failed" or (saved and saved.get("status") == "failed")
@@ -673,7 +686,7 @@ class OMM:
 
     def compact_semantic_index(self) -> dict[str, int | str | bool]:
         """Compact only the disposable SQLite index; canonical memories stay untouched."""
-        with self.operation_lock():
+        with data_lock(self.root / ".omm" / "semantic-build"), self.operation_lock():
             semantic = self.semantic or OllamaSemanticIndex(
                 self.root / ".omm" / "index.sqlite3", endpoint="", model="")
             return semantic.compact_storage()

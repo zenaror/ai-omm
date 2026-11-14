@@ -66,6 +66,10 @@ def measure_performance(omm: OMM, repetitions: int = 30) -> dict:
                                "free_bytes_estimate": page_size * free_pages}
             except (OSError, sqlite3.Error, TypeError, ValueError):
                 pass
+        free = index_pages["free_bytes_estimate"]
+        index_pages["free_percent"] = round(100 * free / index_bytes, 2) if index_bytes else 0
+        index_pages["compaction_recommended"] = free >= 256 * 1024 * 1024 and index_pages["free_percent"] >= 25
+        index_pages["maintenance"] = "Espaço livre interno pode ser reutilizado. Compactação é opcional: rode semantic-compact em período ocioso; este diagnóstico não executa manutenção."
         semantic_enabled = omm.semantic is not None
         source_chunks = omm.source_chunk_count()
     measurements = {"dashboard": _measure(lambda: dashboard_data(omm), repetitions)}
@@ -79,7 +83,7 @@ def measure_performance(omm: OMM, repetitions: int = 30) -> dict:
     if omm.semantic is not None:
         try:
             semantic_current = (index_current and bool(scopes) and
-                                all(omm.semantic.indexed_fingerprint(scope) == omm._canonical_fingerprint()
+                                all(omm.semantic.indexed_fingerprint(scope) == omm._canonical_fingerprint([scope])
                                     for scope in scopes))
             semantic_entries = omm.semantic.chunk_count()
         except (OSError, RuntimeError):

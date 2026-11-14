@@ -428,13 +428,14 @@ def delete_source_markdown(root: Path, source: str,
             "bytes": len(current), "sha256": digest}
 
 
-def read_source_chunks(root: Path, max_chars: int = MAX_CHUNK_CHARS) -> list[SourceChunk]:
+def read_source_chunks(root: Path, max_chars: int = MAX_CHUNK_CHARS,
+                       paths: list[Path] | None = None) -> list[SourceChunk]:
     """Read only the explicit data-root/sources Markdown collection."""
     source_root = root / "sources"
     if not source_root.is_dir():
         return []
     chunks: list[SourceChunk] = []
-    for path in sorted(source_root.rglob("*.md")):
+    for path in sorted(source_root.rglob("*.md") if paths is None else paths):
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_SOURCE_FILE_BYTES:
             continue
         relative = path.relative_to(root).as_posix()

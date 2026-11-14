@@ -196,7 +196,7 @@ with patch('omm.semantic.urlopen',side_effect=embed):
         self.assertTrue(any("Changed checkpoint input" in text for text in embedded))
         self.assertNotIn(self.records[1].id, self.vector_ids())
         self.assertIn(other.id, self.vector_ids())
-        self.assertEqual(resumed.semantic.indexed_fingerprint("demo"), resumed._canonical_fingerprint())
+        self.assertEqual(resumed.semantic.indexed_fingerprint("demo"), resumed._canonical_fingerprint(["demo"]))
         self.assertNotEqual(resumed.semantic.indexed_fingerprint(), resumed._canonical_fingerprint())
         with sqlite3.connect(resumed.semantic.path) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM semantic_checkpoints "
@@ -264,6 +264,13 @@ with patch('omm.semantic.urlopen',side_effect=embed):
         self.assertNotIn("recriado:", stdout.getvalue())
         self.assertIn("retomada", stderr.getvalue())
         self.assertEqual(self.omm.semantic.build_progress()["completed"], 32)
+
+    def test_changes_in_other_projects_do_not_invalidate_ready_scope(self):
+        with patch("omm.semantic.urlopen", side_effect=self.embed):
+            self.omm.rebuild_semantic(["demo"])
+        self.omm.store.append(MemoryRecord(kind="fact", title="Unrelated", content="Other content", source="fixture", scope="other"))
+        self.assertEqual(self.omm.semantic_index_status(["demo"])["status"], "ready")
+        self.assertEqual(self.omm.semantic_index_status(["other"])["status"], "stale")
 
     def test_cli_reports_reused_and_new_items_separately_on_resume(self):
         self.fail_after_batch()

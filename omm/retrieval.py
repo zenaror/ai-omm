@@ -4,9 +4,11 @@ import sqlite3
 import re
 from pathlib import Path
 from typing import Protocol
+from contextlib import closing
+import json
 
 from .models import MemoryRecord
-from .source_documents import SourceChunk, SourceHit
+from .source_documents import SourceChunk, SourceHit, read_source_chunks, MAX_SOURCE_FILE_BYTES
 
 MAX_QUERY_CHARS = 1200
 MAX_QUERY_TERMS = 64
@@ -121,6 +123,7 @@ class SQLiteFTSRetriever:
         with self._connect() as db:
             db.execute("DELETE FROM records")
             db.execute("DELETE FROM source_chunks")
+            db.execute("DROP TABLE IF EXISTS source_manifest")
             db.executemany(
                 "INSERT INTO records(id,kind,scope,title,content,source,tags) VALUES(?,?,?,?,?,?,?)",
                 [(r.id, r.kind, r.scope, r.title, r.content, r.source, " ".join(r.tags)) for r in records if r.status == "active"],
@@ -133,6 +136,60 @@ class SQLiteFTSRetriever:
             if fingerprint is not None:
                 db.execute("INSERT OR REPLACE INTO index_metadata(key,value) VALUES('canonical_fingerprint',?)",
                            (fingerprint,))
+
+    def all_source_chunks(self, scopes: list[str] | None = None) -> list[SourceChunk]:
+        query = "SELECT id,scope,path,heading,start_line,end_line,content FROM source_chunks"
+        parameters = []
+        if scopes is not None:
+            if not scopes:
+                return []
+            query += " WHERE scope IN (" + ",".join("?" for _ in scopes) + ")"
+            parameters = scopes
+        with closing(self._connect()) as db:
+            return [SourceChunk(*row) for row in db.execute(query + " ORDER BY path,start_line", parameters)]
+
+    def refresh(self, records: list[MemoryRecord], root: Path, fingerprint: str) -> dict:
+        """Replace changed documents atomically; never rebuild unchanged source text."""
+        current = {}
+        source_root = root / "sources"
+        for path in sorted(source_root.rglob("*.md")) if source_root.is_dir() else []:
+            if path.is_symlink() or not path.is_file():
+                continue
+            stat = path.stat()
+            if stat.st_size > MAX_SOURCE_FILE_BYTES:
+                continue
+            current[path.relative_to(root).as_posix()] = json.dumps(
+                [stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns])
+        with closing(self._connect()) as db:
+            present = db.execute("SELECT name FROM sqlite_master WHERE name='source_manifest'").fetchone()
+            previous = dict(db.execute("SELECT path,signature FROM source_manifest")) if present else {}
+        changed = [path for path, signature in current.items() if previous.get(path) != signature]
+        removed = set(previous) - set(current)
+        chunks = read_source_chunks(root, paths=[root / path for path in changed])
+        # Reject a source edited externally while its chunks were being prepared.
+        for path in changed:
+            stat = (root / path).stat()
+            if current[path] != json.dumps([stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]):
+                raise RuntimeError("Uma fonte mudou durante a indexação; consulte novamente.")
+        with closing(self._connect()) as db, db:
+            db.execute("CREATE TABLE IF NOT EXISTS source_manifest(path TEXT PRIMARY KEY, signature TEXT NOT NULL)")
+            if not present:
+                db.execute("DELETE FROM source_chunks")
+            else:
+                obsolete = sorted((set(changed) & set(previous)) | removed)
+                for offset in range(0, len(obsolete), 128):
+                    paths = obsolete[offset:offset + 128]
+                    db.execute("DELETE FROM source_chunks WHERE path IN (" + ",".join("?" for _ in paths) + ")", paths)
+            db.executemany(
+                "INSERT INTO source_chunks(id,scope,path,heading,content,start_line,end_line) VALUES(?,?,?,?,?,?,?)",
+                [(c.id, c.scope, c.path, c.heading, c.content, c.start_line, c.end_line) for c in chunks])
+            db.executemany("DELETE FROM source_manifest WHERE path=?", [(path,) for path in removed])
+            db.executemany("INSERT OR REPLACE INTO source_manifest VALUES(?,?)", [(path, current[path]) for path in changed])
+            db.execute("DELETE FROM records")
+            db.executemany("INSERT INTO records(id,kind,scope,title,content,source,tags) VALUES(?,?,?,?,?,?,?)",
+                           [(r.id,r.kind,r.scope,r.title,r.content,r.source," ".join(r.tags)) for r in records if r.status == "active"])
+            db.execute("INSERT OR REPLACE INTO index_metadata VALUES('canonical_fingerprint',?)", (fingerprint,))
+        return {"changed_sources": len(changed), "removed_sources": len(removed), "chunks_written": len(chunks)}
 
     def add(self, record: MemoryRecord) -> None:
         self.add_many([record])

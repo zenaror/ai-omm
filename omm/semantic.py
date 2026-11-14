@@ -163,7 +163,8 @@ class OllamaSemanticIndex:
 
     def rebuild(self, records: list[MemoryRecord], chunks: list[SourceChunk], fingerprint: str,
                 scopes: list[str] | None = None,
-                progress: Callable[[int, int], None] | None = None) -> int:
+                progress: Callable[[int, int], None] | None = None,
+                scope_fingerprints: dict[str, str] | None = None) -> int:
         selected_scopes = None if scopes is None else set(scopes)
         items: list[tuple] = []
         items.extend(("memory", record.id, record.scope, record.title,
@@ -280,7 +281,7 @@ class OllamaSemanticIndex:
                 else:
                     ready_scopes = selected_scopes
                 db.executemany("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES(?,?)",
-                               [("scope:" + scope, fingerprint) for scope in sorted(ready_scopes)])
+                               [("scope:" + scope, (scope_fingerprints or {}).get(scope, fingerprint)) for scope in sorted(ready_scopes)])
                 db.execute("INSERT OR REPLACE INTO semantic_metadata(key,value) VALUES('storage_version',?)",
                            (_STORAGE_VERSION,))
                 if selected_scopes is None:
