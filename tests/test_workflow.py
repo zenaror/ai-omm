@@ -322,6 +322,25 @@ class OMMWorkflowTests(unittest.TestCase):
                 self.assertEqual(result["status"], "ready")
                 self.assertEqual(result["memories"][0]["title"], "Shared protocol")
 
+    def test_dashboard_lists_projects_with_only_continuity_records(self):
+        self.omm.handoff("active", "Implementation checkpoint", [], [], [], "fixture", scope="implementation-only")
+        with self.omm.store.workstreams_path.open("a") as stream:
+            stream.write(json.dumps({"id": "fixture-front", "scope": "workstream-only", "status": "active"}) + "\n")
+        payload = dashboard_data(self.omm)
+        self.assertIn("implementation-only", payload["scopes"])
+        self.assertIn("workstream-only", payload["scopes"])
+        self.assertEqual(payload["summary"]["active_count"], 0)
+        self.assertEqual(payload["records"], [])
+        selected = dashboard_data(self.omm, scope="implementation-only")
+        self.assertEqual(selected["handoff"]["summary"], "Implementation checkpoint")
+        self.assertEqual(selected["organization"]["handoff"]["scope"], "implementation-only")
+        # Removing canonical continuity must remove the otherwise-empty project.
+        self.omm.store.handoffs_path.write_text("")
+        self.omm.store.workstreams_path.write_text("")
+        after = dashboard_data(self.omm)
+        self.assertNotIn("implementation-only", after["scopes"])
+        self.assertNotIn("workstream-only", after["scopes"])
+
     def test_web_dashboard_shows_usage_sources_and_can_archive_and_restore(self):
         record = MemoryRecord(kind="unknown", title="Cadência ainda desconhecida",
                               content="Medir a animação antes de propor uma causa.",

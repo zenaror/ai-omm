@@ -14,6 +14,9 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- Projetos que têm apenas uma passagem de trabalho ou uma frente cadastrada
+  também aparecem no filtro do painel, mesmo sem anotações ou documentos.
+
 - A inicialização recupera transações interrompidas do SQLite quando há um
   diário pendente, preservando os vetores e lotes salvos em vez de reiniciar
   continuamente com erro de banco somente leitura.

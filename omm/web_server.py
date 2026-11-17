@@ -83,7 +83,12 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
         context_preview = None
         source_root = omm.root / "sources"
         source_scopes = {p.name for p in source_root.iterdir() if p.is_dir()} if source_root.exists() else set()
-        scopes = sorted({r.scope for r in all_records} | source_scopes | {"global"})
+        handoffs = _json_lines(omm.store.handoffs_path)
+        workstreams = _json_lines(omm.store.workstreams_path)
+        continuity_scopes = {item.get("scope", "default") for item in handoffs + workstreams
+                             if isinstance(item.get("scope", "default"), str)
+                             and item.get("scope", "default").strip()}
+        scopes = sorted({r.scope for r in all_records} | source_scopes | continuity_scopes | {"global"})
         source_hits = []
         if query.strip():
             matched_ids = {r.id for r in omm.search(query, 100, scopes=[scope] if scope else None)}
@@ -226,7 +231,7 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             "sources": project_sources,
             "active_memory_count": len(scoped_records),
             "unknown_count": sum(r.kind == "unknown" for r in scoped_records),
-            "handoff": next((h for h in reversed(_json_lines(omm.store.handoffs_path))
+            "handoff": next((h for h in reversed(handoffs)
                              if scope and h.get("scope", "default") == scope), None),
         }
         scope_labels = {name: profiles.get(name, {}).get(
@@ -234,7 +239,6 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             for name in scopes}
         skill_bytes = sum((omm.root / item["source"]).stat().st_size for item in skills)
         policies = _json_lines(omm.store.policies_path)
-        handoffs = _json_lines(omm.store.handoffs_path)
         scoped_handoffs = [h for h in handoffs if not scope or h.get("scope", "default") == scope]
         pending_proposals = omm.proposals(pending_only=True)
         if scope:
