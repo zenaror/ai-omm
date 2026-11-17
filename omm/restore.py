@@ -8,7 +8,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
+from .git_credentials import credential_entry
 
 from .backup_worker import BackupError, _validate_memory, _validate_sources
 from .service import OMM
@@ -187,13 +188,14 @@ def _run_git_authenticated(args: list[str], source: str, username: str, token: s
     credential_file: str | None = None
     try:
         if token and urlsplit(source).scheme in {"http", "https"}:
-            host = urlsplit(source).hostname
-            if not host:
-                raise RestoreError("o endereço HTTPS do repositório não é válido")
+            try:
+                entry = credential_entry(source, username, token)
+            except ValueError as exc:
+                raise RestoreError(str(exc)) from exc
             fd, credential_file = tempfile.mkstemp(prefix="omm-restore-credentials-")
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as credentials:
-                credentials.write(f"https://{quote(username, safe='')}:{quote(token, safe='')}@{host}\n")
+                credentials.write(entry)
             args = ["-c", f"credential.helper=store --file={credential_file}", *args]
         _run_git(args)
     finally:
@@ -227,13 +229,14 @@ def restore_from_git(destination: Path, source: str, branch: str = "main",
     try:
         command = ["clone", "--branch", branch, "--single-branch", source, str(checkout)]
         if token and urlsplit(source).scheme in {"http", "https"}:
-            host = urlsplit(source).hostname
-            if not host:
-                raise RestoreError("o endereço HTTPS do repositório não é válido")
+            try:
+                entry = credential_entry(source, username, token)
+            except ValueError as exc:
+                raise RestoreError(str(exc)) from exc
             fd, credential_file = tempfile.mkstemp(prefix="omm-restore-credentials-")
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as credentials:
-                credentials.write(f"https://{quote(username, safe='')}:{quote(token, safe='')}@{host}\n")
+                credentials.write(entry)
             command = ["-c", f"credential.helper=store --file={credential_file}", *command]
         _run_git(command)
         if not (checkout / "memory").is_dir():

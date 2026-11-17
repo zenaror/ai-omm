@@ -7,7 +7,8 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import tempfile
 from datetime import datetime, timezone
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
+from .git_credentials import credential_entry
 
 from .backup_worker import BackupError, CANONICAL_PATHS, _validate_memory, _validate_sources, _send_backup, _error_category
 from .locking import data_lock
@@ -36,14 +37,15 @@ def _credential_args(root: Path, remote: str, remote_url: str, username: str, to
     command_env = os.environ.copy()
     command_env.update(extra_env or {})
     try:
-        if token:
-            host = urlsplit(remote_url).hostname
-            if not host:
-                raise SyncError("não consegui identificar o servidor Git para autenticação")
+        if token and urlsplit(remote_url).scheme in {"http", "https"}:
+            try:
+                entry = credential_entry(remote_url, username, token)
+            except ValueError as exc:
+                raise SyncError(str(exc)) from exc
             fd, credential_file = tempfile.mkstemp(prefix="omm-git-credentials-")
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                stream.write(f"https://{quote(username, safe='')}:{quote(token, safe='')}@{host}\n")
+                stream.write(entry)
             return _run(root, "-c", f"credential.helper=store --file={credential_file}",
                         *operation, env=command_env)
         return _run(root, *operation, env=command_env)

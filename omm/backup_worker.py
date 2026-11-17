@@ -10,7 +10,8 @@ import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
+from .git_credentials import credential_entry
 from zoneinfo import ZoneInfo
 from .locking import data_lock
 from .backup_state import write_backup_state, backup_lock_root
@@ -169,13 +170,12 @@ def _send_backup(root, remote, branch, remote_url, username, token, target, atte
     write_backup_state(root, last_attempt_at=datetime.now(timezone.utc).isoformat())
     try:
         if _remote_uses_https(remote_url) and not token:
-            raise BackupError("commit salvo localmente; informe OMM_GIT_BACKUP_TOKEN para envio HTTPS")
+            raise BackupError("commit salvo localmente; informe OMM_GIT_BACKUP_TOKEN para envio HTTP ou HTTPS")
         if token and _remote_uses_https(remote_url):
             fd, credential_file = tempfile.mkstemp(prefix="omm-git-credentials-")
             os.fchmod(fd, 0o600)
-            url = urlsplit(remote_url)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                stream.write(f"{url.scheme}://{quote(username, safe='')}:{quote(token, safe='')}@{url.netloc}\n")
+                stream.write(credential_entry(remote_url, username, token))
             prefix = ["-c", f"credential.helper=store --file={credential_file}"]
         last_error = BackupError("não foi possível confirmar o envio remoto")
         for attempt in range(1, attempts + 1):

@@ -250,6 +250,35 @@ o servidor ocupado. Aguarde a resposta; recarregar ou reiniciar não torna o
 disco mais rápido. O painel mantém um aviso de carregamento ou falha, além do
 aviso passageiro. Essas mensagens não confirmam envio ao backup remoto.
 
+### Servidor Git com HTTP ou porta própria
+
+O backup aceita URLs HTTP e HTTPS, incluindo uma porta informada no endereço:
+
+```dotenv
+OMM_GIT_BACKUP_REPOSITORY_URL=http://git-interno.example:3000/equipe/omm-dados.git
+```
+
+A OMM respeita o protocolo e a porta escolhidos no backup automático, na
+sincronização e na recuperação. As credenciais continuam nas variáveis próprias;
+não coloque o token na URL. HTTP não criptografa esse acesso: use-o apenas na rede
+interna em que você decidiu permitir essa comunicação.
+
+Se estiver mudando apenas o caminho de acesso ao mesmo repositório, confira antes
+se os dois endereços mostram o mesmo backup. Atualize a variável da stack e o
+endereço `origin` da cópia de dados na mesma manutenção, antes de iniciar a stack
+com o novo endereço:
+
+```sh
+docker compose exec -T omm git -C /data remote set-url origin \
+  'http://git-interno.example:3000/equipe/omm-dados.git'
+```
+
+Troque o exemplo pelo endereço verificado. No Portainer, você pode executar a
+parte `git -C /data remote set-url origin ...` no console do container principal.
+Depois, recrie os serviços principal e de backup com a variável atualizada. A
+proteção da inicialização recusa um endereço diferente do `origin` para evitar
+substituir seus dados por outro repositório; não apague a pasta para contornar isso.
+
 ### Sincronizar pelo terminal ou por automação
 
 Também é possível fazer a mesma sincronização sem abrir o painel. Abra um terminal na pasta que contém `compose.yaml` e `.env` e use o comando da ferramenta de containers que você instalou:

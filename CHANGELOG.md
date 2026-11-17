@@ -21,6 +21,9 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Consertado
 
+- Sincronização e recuperação de backups preservam o protocolo HTTP ou HTTPS
+  e a porta do servidor ao autenticar, permitindo acesso direto a um Git interno.
+
 - Projetos que têm apenas uma passagem de trabalho ou uma frente cadastrada
   também aparecem no filtro do painel, mesmo sem anotações ou documentos.
 
