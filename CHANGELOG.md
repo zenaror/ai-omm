@@ -9,7 +9,8 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 - Projetos podem ter nomes antigos como atalhos: o painel mostra uma entrada,
   as consultas incluem os históricos e novas gravações usam o nome principal.
-  Os arquivos e as evidências originais permanecem nos mesmos lugares.
+  Os históricos e as evidências originais são preservados; endereços antigos
+  continuam recuperáveis após uma união física autorizada.
 - O filtro separa projetos, conhecimento compartilhado e experimentos. Novas
   frentes de trabalho podem informar a qual projeto pertencem.
 

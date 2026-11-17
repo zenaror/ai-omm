@@ -124,6 +124,30 @@ class ProjectCatalogTests(unittest.TestCase):
             self.assertEqual(query.call_args.args[-1], selected)
             self.assertNotIn('different', selected)
 
+    def test_physical_merge_retains_exact_bytes_and_old_source_artifact_addresses(self):
+        import base64
+        from omm import artifacts
+        from omm.source_documents import read_source_batch
+        # Existing legacy bytes must be uploaded with the pre-alias low-level API.
+        self.path.unlink()
+        source = self.omm.import_source('legacy', 'old.md', '# Historic\nExact bytes\n')
+        blob = b'original recovery bytes'
+        artifact = self.omm.import_artifact('legacy', base64.b64encode(blob).decode(),
+                                          hashlib.sha256(blob).hexdigest(), 'Recovery', 'Fixture', 'Test')
+        self.omm.store.append_handoff({'scope':'legacy','summary':'Old','status':'completed',
+                                      'updated_at':'2020-01-01T00:00:00+00:00'})
+        self.omm.handoff('active','Current',[],[],[],'test',scope='canonical')
+        self.catalog()
+        plan = self.omm.merge_scope('legacy','canonical')
+        self.omm.merge_scope('legacy','canonical',False,plan['plan_sha256'])
+        self.assertFalse((self.root/'sources/legacy').exists())
+        self.assertEqual(self.omm.get_handoff('canonical')['state']['summary'], 'Current')
+        read = read_source_batch(self.root,[{'path':source['source'],'expected_sha256':source['sha256']}])
+        self.assertEqual(read['items'][0]['content'], '# Historic\nExact bytes\n')
+        card, data = artifacts._read(self.root,artifact['path'])
+        self.assertEqual(data,blob)
+        self.assertEqual(len(dashboard_data(self.omm,scope='canonical')['organization']['sources']),2)
+
     def test_workstream_scope_and_panel_use_latest_snapshot_only(self):
         self.omm.create_workstream('new-front', 'Work', scope='owner/repo')
         self.assertEqual(self.omm.get_workstream('new-front')['scope'], 'canonical')

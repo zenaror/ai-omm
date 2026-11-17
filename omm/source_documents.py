@@ -140,6 +140,11 @@ def _managed_source_path(root: Path, source: str) -> Path:
         cursor = cursor / part
         if cursor.is_symlink():
             raise ValueError("O caminho da fonte contém um link simbólico.")
+    if not target.exists():
+        from .projects import ProjectCatalog
+        migrated = ProjectCatalog(data_root).merged_source(source)
+        if migrated != source and (data_root / migrated).exists():
+            return _managed_source_path(data_root, migrated)
     if target.is_symlink():
         raise ValueError("A fonte é um link simbólico e não foi alterada.")
     if not target.is_file() or not target.resolve().is_relative_to(source_root.resolve()):

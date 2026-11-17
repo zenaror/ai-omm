@@ -212,7 +212,10 @@ sobre os históricos e mantém a proteção de versão entre os dois nomes. O al
 não une estados de projetos distintos nem transforma um histórico em estado atual.
 
 Esse agrupamento não move nem apaga fontes, artefatos ou handoffs. Uma união física
-é uma operação diferente, descrita abaixo. Frentes novas podem informar `scope`
+é uma operação diferente, descrita abaixo. Quando uma união física autorizada
+usou a pasta `legacy-<nome-antigo>`, endereços antigos de fontes e artefatos
+continuam recuperáveis pelo alias, com o mesmo SHA e os mesmos bytes.
+Frentes novas podem informar `scope`
 em `create_workstream` (CLI: `workstream create --scope meu-projeto`); clientes
 antigos continuam aceitos, mas devem passar o projeto para evitar frentes soltas.
 

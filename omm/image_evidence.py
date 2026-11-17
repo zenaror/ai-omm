@@ -108,6 +108,11 @@ def safe_path(root: Path, relative: str) -> Path:
         cursor /= part
         if cursor.is_symlink():
             raise ValueError("Evidências não podem usar links simbólicos.")
+    if not cursor.exists():
+        from .projects import ProjectCatalog
+        migrated = ProjectCatalog(resolved).merged_source(relative)
+        if migrated != relative and (resolved / migrated).exists():
+            return safe_path(resolved, migrated)
     if not cursor.resolve().is_relative_to(resolved):
         raise ValueError("A evidência precisa ficar nos dados da OMM.")
     return cursor

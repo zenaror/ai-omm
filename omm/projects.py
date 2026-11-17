@@ -64,6 +64,16 @@ class ProjectCatalog:
         return None if scopes is None else list(dict.fromkeys(
             name for scope in scopes for name in self.family(scope)))
 
+    def merged_source(self, source: str) -> str:
+        """Resolve a missing historical path after an explicit physical scope merge."""
+        parts = source.split("/")
+        if len(parts) < 3 or parts[0] != "sources":
+            return source
+        alias = parts[1]
+        if alias not in self.aliases or not _SIMPLE.fullmatch(alias):
+            return source
+        return "/".join(["sources", self.aliases[alias], "legacy-" + alias, *parts[2:]])
+
     def label(self, scope: str, fallback: str | None = None) -> str:
         return self.projects.get(self.canonical(scope), {}).get('display_name', fallback or scope)
 
