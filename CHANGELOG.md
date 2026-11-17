@@ -7,6 +7,12 @@ detalhes da implementação. O formato segue o [Keep a Changelog](https://keepac
 
 ### Adicionado
 
+- Projetos podem ter nomes antigos como atalhos: o painel mostra uma entrada,
+  as consultas incluem os históricos e novas gravações usam o nome principal.
+  Os arquivos e as evidências originais permanecem nos mesmos lugares.
+- O filtro separa projetos, conhecimento compartilhado e experimentos. Novas
+  frentes de trabalho podem informar a qual projeto pertencem.
+
 - O painel abre documentos por trechos e destaca os arquivos atualizados
   recentemente, separando essa data da criação das anotações.
 - O diagnóstico de uso mostra faixas de duração das chamadas, com cobertura

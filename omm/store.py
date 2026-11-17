@@ -167,7 +167,8 @@ class CanonicalStore:
         with self.handoffs_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(handoff, ensure_ascii=False, sort_keys=True) + "\n")
 
-    def create_workstream(self, workstream_id: str, title: str, created_by: str, status: str = "active") -> dict:
+    def create_workstream(self, workstream_id: str, title: str, created_by: str, status: str = "active",
+                          scope: str | None = None) -> dict:
         if not isinstance(workstream_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", workstream_id):
             raise OMMError("INVALID_ARGUMENT", "Identificador de frente inválido.", "Use até 120 letras, números, hífens ou sublinhados; inclua o nome do projeto.")
         self._validate_workstream(title, created_by, status)
@@ -176,6 +177,9 @@ class CanonicalStore:
         item = {"id": workstream_id, "title": title, "status": status,
                 "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                 "created_by": created_by}
+        if scope is not None:
+            from .projects import ProjectCatalog
+            item["scope"] = ProjectCatalog(self.root).write_scope(scope)
         self._append_workstream(item)
         return self.workstream_version(item)
 

@@ -181,6 +181,41 @@ Cada vetor armazenado já está normalizado; o produto interno equivale à simil
 
 `context` combina o estado corrente e registros lexicalmente relevantes. O formatador Markdown preserva título, tipo, origem, confiança e referências de evidência. O orçamento padrão é 5.000 caracteres e o limite máximo é 12.000. Fontes podem ser acrescentadas, em até dois trechos curtos, apenas se couberem no orçamento; a ferramenta permite desligar a inclusão. Recuperação sob demanda reduz o contexto enviado ao modelo e mantém documentos grandes fora do prompt quando não são necessários.
 
+### Um projeto com vários nomes históricos
+
+Um cadastro opcional em `memory/projects.json` reúne o nome principal, os nomes
+antigos (aliases), o nome de exibição e a categoria. Ele pertence aos dados da OMM
+que entram no backup Git, não à configuração particular de um agente. Sem o
+arquivo, os projetos existentes continuam funcionando como antes.
+
+```json
+{
+  "schema_version": 1,
+  "projects": {
+    "meu-projeto": {"display_name": "Meu projeto", "category": "project"}
+  },
+  "aliases": {"nome-antigo": "meu-projeto"}
+}
+```
+
+A administração confere e grava esse cadastro sob a trava dos dados. Não se
+adivinham identidades por letras maiúsculas, nome parecido ou repositório. Os
+destinos são identificadores simples; não se permitem ciclos nem redefinir
+`global` e `default`. Um caminho antigo só pode ser uma chave de alias explícita:
+ele nunca é usado como caminho para gravar arquivos.
+
+O painel apresenta uma entrada por projeto e separa `project`, `shared` e
+`experiment`. Buscas lexicais e semânticas incluem os nomes antigos autorizados;
+as fontes e imagens continuam acessíveis nos caminhos originais. As gravações
+por um alias usam o identificador principal. O handoff canônico tem prioridade
+sobre os históricos e mantém a proteção de versão entre os dois nomes. O alias
+não une estados de projetos distintos nem transforma um histórico em estado atual.
+
+Esse agrupamento não move nem apaga fontes, artefatos ou handoffs. Uma união física
+é uma operação diferente, descrita abaixo. Frentes novas podem informar `scope`
+em `create_workstream` (CLI: `workstream create --scope meu-projeto`); clientes
+antigos continuam aceitos, mas devem passar o projeto para evitar frentes soltas.
+
 ### Unificação de escopos de projeto
 
 `merge_scope(source_scope, target_scope, dry_run=true)` prepara uma prévia sem gravar dados. A resposta inclui contagens, conflitos e um `plan_sha256` calculado a partir dos arquivos envolvidos. A execução exige `dry_run=false` e o mesmo hash; se algo mudar entre a prévia e a execução, a OMM exige outra simulação.

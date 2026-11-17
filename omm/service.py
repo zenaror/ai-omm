@@ -16,6 +16,7 @@ import uuid
 from .adapters import GenericMarkdownAdapter
 from .continuity import checkpoint_metadata, validate_repository, validate_revision
 from .errors import OMMError
+from .projects import ProjectCatalog
 from .models import MemoryRecord
 from .retrieval import Retriever, SQLiteFTSRetriever, is_index_corruption
 from .redaction import find_credentials
@@ -71,6 +72,21 @@ class OMM:
             except ValueError as exc:
                 raise ValueError("OMM_EMBEDDING_TIMEOUT precisa ser um número de segundos.") from exc
             self.semantic = OllamaSemanticIndex(self.root / ".omm" / "index.sqlite3", endpoint, model, timeout)
+
+    def project_catalog(self) -> ProjectCatalog:
+        return ProjectCatalog(self.root)
+
+    def project_state(self, scope: str | None, workstream_id: str | None = None) -> dict:
+        if scope is None:
+            return self.store.read_state(workstream_id, scope)
+        catalog = self.project_catalog()
+        canonical = catalog.canonical(scope)
+        state = self.store.read_state(workstream_id, canonical)
+        if state.get("updated_at"):
+            return state  # A legacy checkpoint must never replace the canonical one.
+        histories = [self.store.read_state(workstream_id, alias) for alias in catalog.family(canonical)[1:]]
+        available = [item for item in histories if item.get("updated_at")]
+        return max(available, key=lambda item: item["updated_at"]) if available else state
 
     def _current_index_file_signature(self) -> tuple[int, int, int] | None:
         return self.retriever.file_signature()
@@ -241,8 +257,9 @@ class OMM:
         return index_pending
 
     def remember(self, record: MemoryRecord) -> None:
-        self._validate_memory_input(record)
         with self.operation_lock():
+            record.scope = self.project_catalog().write_scope(record.scope)
+            self._validate_memory_input(record)
             if record.workstream_id and not any(item["id"] == record.workstream_id for item in self.store.workstreams()):
                 raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
             available, was_current = self._note_index_snapshot()
@@ -251,8 +268,9 @@ class OMM:
 
     def propose_memory(self, record: MemoryRecord) -> dict:
         """Queue a proposed memory for human review with lexical near-match hints."""
-        self._validate_memory_input(record)
         with self.operation_lock():
+            record.scope = self.project_catalog().write_scope(record.scope)
+            self._validate_memory_input(record)
             matches = self._search(record.title, 3, scopes=[record.scope])
             proposal = {
                 "id": str(uuid.uuid4()), "status": "pending", "proposed_at": record.created_at,
@@ -296,6 +314,7 @@ class OMM:
                 workstreams = {item["id"] for item in self.store.workstreams()}
                 for proposal in pending:
                     record = MemoryRecord.from_json(json.dumps(proposal["record"], ensure_ascii=False))
+                    record.scope = self.project_catalog().write_scope(record.scope)
                     self._validate_memory_input(record)
                     if record.workstream_id and record.workstream_id not in workstreams:
                         raise ValueError("Uma sugestão aponta para uma frente de trabalho inexistente.")
@@ -406,6 +425,7 @@ class OMM:
             return []
         if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
             raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
+        scopes = self.project_catalog().expand(scopes)
         self._ensure_index_current()
         canonical = self._records_by_id()
         search_limit = limit if workstream_id is None else max(limit * 10, 100)
@@ -429,7 +449,7 @@ class OMM:
             budget = max(800, min(int(budget_chars), MAX_CONTEXT_CHARS))
             selected = self.search(query, min(limit, 10), workstream_id, scopes)
             rendered = self.adapter.render_context(
-                selected, self.store.read_state(workstream_id, state_scope), budget
+                selected, self.project_state(state_scope, workstream_id), budget
             )
             if not include_sources:
                 return rendered
@@ -458,6 +478,7 @@ class OMM:
     def search_sources(self, query: str, limit: int = 10,
                        scopes: list[str] | None = None) -> list[SourceHit]:
         with self.operation_lock():
+            scopes = self.project_catalog().expand(scopes)
             self._ensure_index_current()
             with self.timings.measure("lexical_source_query"):
                 return self.retriever.search_sources(query, max(0, min(int(limit), MAX_SOURCE_RESULTS)), scopes)
@@ -465,6 +486,7 @@ class OMM:
     def import_artifact(self, scope: str, content_base64: str, sha256: str,
                         title: str, description: str, origin: str) -> dict:
         with self.operation_lock():
+            scope = self.project_catalog().write_scope(scope)
             result = artifacts.upload_artifact(self.root, scope, content_base64, sha256,
                                                title, description, origin)
             if result["status"] == "imported":
@@ -473,13 +495,32 @@ class OMM:
 
     def import_image(self, scope: str, raw: bytes, metadata: dict) -> dict:
         with self.operation_lock():
+            scope = self.project_catalog().write_scope(scope)
             result = image_evidence.import_image(self.root, scope, raw, metadata)
             self._index_schema_valid = False
             return result
 
     def list_images(self, scope: str, offset: int = 0, limit: int = 20) -> dict:
         with self.operation_lock():
-            return image_evidence.list_images(self.root, scope, offset, limit)
+            family = self.project_catalog().family(scope)
+            if len(family) == 1:
+                return image_evidence.list_images(self.root, scope, offset, limit)
+            # Validate the caller's pagination before aggregating descriptions.
+            image_evidence.list_images(self.root, family[0], offset, limit)
+            items = []
+            for name in family:
+                if "/" in name or "\\" in name:
+                    continue  # Path aliases are identifiers, never filesystem paths.
+                page_offset = 0
+                while True:
+                    page = image_evidence.list_images(self.root, name, page_offset, 100)
+                    items.extend(page["items"])
+                    if page["next_offset"] is None:
+                        break
+                    page_offset = page["next_offset"]
+            items.sort(key=lambda item: item.get("path", ""))
+            return {"items": items[offset:offset + limit], "total": len(items),
+                    "next_offset": offset + limit if offset + limit < len(items) else None}
 
     def describe_image(self, path: str) -> dict:
         with self.operation_lock():
@@ -502,6 +543,7 @@ class OMM:
         if find_credentials(content):
             raise ValueError("A fonte parece conter senha, token ou chave privada; remova o segredo antes de importar.")
         with self.operation_lock():
+            scope = self.project_catalog().write_scope(scope)
             result = import_source_markdown(self.root, scope, relative_path, content)
             if result["status"] == "imported":
                 self._index_schema_valid = False
@@ -574,6 +616,7 @@ class OMM:
 
     def rebuild_semantic(self, scopes: list[str] | None = None, progress=None) -> int:
         """Create the optional vector index from canonical records and source files."""
+        scopes = self.project_catalog().expand(scopes)
         if self.semantic is None:
             raise SemanticSearchError("Busca semântica desligada. Configure OMM_SEMANTIC_ENABLED=true e os dados do serviço de embeddings.")
         if scopes is not None and (not scopes or any(not isinstance(scope, str) or not scope.strip() for scope in scopes)):
@@ -671,6 +714,7 @@ class OMM:
 
     def semantic_index_status(self, scopes: list[str] | None = None) -> dict[str, object]:
         """Report semantic index state without waiting for an embedding job."""
+        scopes = self.project_catalog().expand(scopes)
         if self.semantic is None:
             return {"enabled": False, "status": "disabled", "indexed_entries": 0}
         with self._semantic_job_lock:
@@ -717,6 +761,7 @@ class OMM:
     def semantic_search_nonblocking(self, query: str, mode: str = "all", limit: int = 5,
                                     scopes: list[str] | None = None) -> dict[str, object]:
         """MCP-friendly search that starts a cold index build without holding a request open."""
+        scopes = self.project_catalog().expand(scopes)
         if self.semantic is None:
             raise SemanticSearchError("Busca semântica desligada. Configure OMM_SEMANTIC_ENABLED=true e reinicie a OMM.")
         if mode not in {"all", "memory", "sources"}:
@@ -739,6 +784,7 @@ class OMM:
     def semantic_search(self, query: str, mode: str = "all", limit: int = 5,
                         scopes: list[str] | None = None) -> dict[str, list[dict]]:
         """Search by meaning only when explicitly requested by the caller."""
+        scopes = self.project_catalog().expand(scopes)
         if self.semantic is None:
             raise SemanticSearchError("Busca semântica desligada. Configure OMM_SEMANTIC_ENABLED=true e reinicie a OMM.")
         if mode not in {"all", "memory", "sources"}:
@@ -757,11 +803,12 @@ class OMM:
         with self.operation_lock():
             return self.retriever.source_chunk_count()
 
-    def create_workstream(self, workstream_id: str, title: str, actor: str = "human", status: str = "active") -> dict:
+    def create_workstream(self, workstream_id: str, title: str, actor: str = "human", status: str = "active",
+                          scope: str | None = None) -> dict:
         with self.operation_lock():
             if not title.strip():
                 raise ValueError("workstream title cannot be empty")
-            return self.store.create_workstream(workstream_id, title, actor, status)
+            return self.store.create_workstream(workstream_id, title, actor, status, scope)
 
     def workstreams(self) -> list[dict]:
         with self.operation_lock():
@@ -794,9 +841,10 @@ class OMM:
                     observed_revision: str | None = None, observed_repository: str | None = None) -> dict:
         """Expose the complete current state and a stable digest for guarded updates."""
         with self.operation_lock():
+            scope = self.project_catalog().canonical(scope)
             if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
                 raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
-            state = self.store.read_state(workstream_id, scope)
+            state = self.project_state(scope, workstream_id)
             encoded = json.dumps({"scope": scope, "workstream_id": workstream_id, "state": state},
                                  ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             result = {"scope": scope, "workstream_id": workstream_id, "state": state,
@@ -813,6 +861,7 @@ class OMM:
                                    or any(ord(c) < 32 for c in branch) or find_credentials(branch)):
             raise OMMError("INVALID_ARGUMENT", "O nome da branch é inválido.", "Informe apenas o nome da branch, sem comandos ou credenciais.")
         with self.operation_lock():
+            scope = self.project_catalog().write_scope(scope)
             if workstream_id and not any(item["id"] == workstream_id for item in self.store.workstreams()):
                 raise OMMError("UNKNOWN_WORKSTREAM", "A frente de trabalho não está cadastrada.", "Consulte list_workstreams. Cadastre com create_workstream somente se a tarefa exigir uma nova frente autorizada.")
             if expected_sha256 is not None:

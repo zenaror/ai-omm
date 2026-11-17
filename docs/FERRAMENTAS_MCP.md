@@ -6,6 +6,11 @@ Você pode pedir em português: “Procure na OMM onde paramos no meu projeto”
 
 **Escopo** é a gaveta do projeto. `global` guarda o que vale para vários projetos. Em buscas, `include_global=false` consulta só a gaveta escolhida; `true` inclui a global. **SHA-256** é a impressão digital do conteúdo: muda quando o arquivo muda. Nunca invente um hash nem use apenas o começo dele numa alteração.
 
+Quando um projeto tem nomes históricos cadastrados pela administração, eles
+funcionam como atalhos para o nome principal. Consultas incluem os históricos e
+novas gravações usam o projeto principal. Não é preciso duplicar documentos para
+consultar um nome antigo. Os projetos relacionados continuam separados.
+
 ## Qual ferramenta escolho?
 
 | Quero… | Começo por… |
@@ -718,10 +723,11 @@ sem cadastrar frente.
 ### `create_workstream`
 
 Cadastre uma frente nova apenas quando a tarefa exigir e estiver autorizada.
-Confira a lista antes para evitar duplicatas. Use um ID com nome de projeto.
+Confira a lista antes para evitar duplicatas. Use um ID com nome de projeto e
+informe `scope` para a frente aparecer no projeto correto.
 
 ```json
-{"workstream_id":"meu-projeto-audio","title":"Áudio","actor":"agente","status":"active"}
+{"workstream_id":"meu-projeto-audio","title":"Áudio","actor":"agente","status":"active","scope":"meu-projeto"}
 ```
 
 Isso não cria agentes, metas nativas ou handoffs, nem concede permissões.

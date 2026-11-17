@@ -155,8 +155,14 @@ function render(data) {
   const remoteBackup=backup.state==="synced"?`envio remoto confirmado em ${new Date(backup.last_success_at).toLocaleString("pt-BR")}`:backup.state==="failed"?`envio remoto pendente (${backup.error_category||"falha"}); o commit local não confirma backup remoto`:backup.state==="sending"||backup.state==="retrying"?"envio remoto em andamento":backup.state==="local_only"?"backup somente local":"envio remoto ainda não verificado";
   $("health").textContent=`${freshness} (${indexTime}) · último commit local: ${backupTime} · ${remoteBackup} · índice local: ${size(s.index_bytes||0)}`;
   const scopeSelect=$("scope"), old=scopeSelect.value; scopeSelect.replaceChildren(); addOption(scopeSelect,"","Todos os projetos");
-  for(const scope of data.scopes) addOption(scopeSelect,scope,scope==="global"?"Conhecimento compartilhado":(data.scope_labels?.[scope]||scope));
-  scopeSelect.value=data.scopes.includes(old)?old:"";
+  for(const [category,label] of [["project","Projetos"],["shared","Conhecimento compartilhado"],["experiment","Experimentos e diagnósticos"]]) {
+    const names=data.scopes.filter(scope=>(data.scope_categories?.[scope]||(scope==="global"?"shared":"project"))===category);
+    if(!names.length) continue;
+    const group=document.createElement("optgroup"); group.label=label; scopeSelect.append(group);
+    for(const scope of names) addOption(group,scope,data.scope_labels?.[scope]||scope);
+  }
+  const selected=data.scope_aliases?.[old]||old;
+  scopeSelect.value=data.scopes.includes(selected)?selected:"";
   $("followup-tab-count").textContent = (data.open_questions || []).length;
   $("review-tab-count").textContent = data.proposal_count || 0;
   renderOpenQuestions(data.open_questions||[], data.scope_labels||{});

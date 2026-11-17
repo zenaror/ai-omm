@@ -77,6 +77,9 @@ def _tree_stats(root: Path) -> tuple[int, float, list[Path]]:
 def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bool = False) -> dict:
     """Return canonical data for the screen; SQLite is used only to find active notes."""
     with omm.operation_lock():
+        catalog = omm.project_catalog()
+        scope = catalog.canonical(scope) if scope else scope
+        family = set(catalog.family(scope)) if scope else set()
         all_records = omm.records()
         active = [r for r in all_records if r.status == "active"]
         removed = [r for r in all_records if r.status != "active"]
@@ -84,11 +87,12 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
         source_root = omm.root / "sources"
         source_scopes = {p.name for p in source_root.iterdir() if p.is_dir()} if source_root.exists() else set()
         handoffs = _json_lines(omm.store.handoffs_path)
-        workstreams = _json_lines(omm.store.workstreams_path)
+        workstreams = omm.store.workstreams()
         continuity_scopes = {item.get("scope", "default") for item in handoffs + workstreams
                              if isinstance(item.get("scope", "default"), str)
                              and item.get("scope", "default").strip()}
-        scopes = sorted({r.scope for r in all_records} | source_scopes | continuity_scopes | {"global"})
+        scopes = sorted({catalog.canonical(name) for name in
+                         ({r.scope for r in all_records} | source_scopes | continuity_scopes | {"global"})})
         source_hits = []
         if query.strip():
             matched_ids = {r.id for r in omm.search(query, 100, scopes=[scope] if scope else None)}
@@ -117,12 +121,12 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
         else:
             chosen = active + (removed if show_archived else [])
         if scope:
-            chosen = [r for r in chosen if r.scope == scope]
+            chosen = [r for r in chosen if r.scope in family]
         chosen.sort(key=lambda r: r.created_at, reverse=True)
         records = [{
             "id": r.id, "kind": r.kind, "title": r.title, "content": r.content,
             "source": r.source, "evidence": r.evidence, "scope": r.scope,
-            "status": r.status, "created_at": r.created_at, "tags": r.tags,
+            "status": r.status, "created_at": r.created_at, "tags": r.tags, "canonical_scope": catalog.canonical(r.scope),
         } for r in chosen[:200]]
 
         open_questions = sorted(
@@ -132,15 +136,16 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
         )
         open_question_items = [{
             "id": r.id, "title": r.title, "content": r.content,
-            "source": r.source, "evidence": r.evidence, "scope": r.scope,
-            "created_at": r.created_at,
+            "source": r.source, "evidence": r.evidence, "scope": catalog.canonical(r.scope),
+            "original_scope": r.scope, "created_at": r.created_at,
         } for r in open_questions]
 
         kinds: dict[str, int] = {}
         by_scope: dict[str, int] = {}
         for r in active:
             kinds[r.kind] = kinds.get(r.kind, 0) + 1
-            by_scope[r.scope] = by_scope.get(r.scope, 0) + 1
+            canonical = catalog.canonical(r.scope)
+            by_scope[canonical] = by_scope.get(canonical, 0) + 1
         memory_root = omm.root / "memory"
         memory_bytes, memory_change, _ = _tree_stats(memory_root)
         source_bytes, source_change, source_markdown = _tree_stats(source_root)
@@ -201,10 +206,10 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             applicable_skills.append(item)
         shared_knowledge = profile.get("shared_project_knowledge", [])
         project_sources = []
-        selected_source_root = source_root / scope if scope in scopes and scope and source_root.exists() else None
+        selected_source_root = source_root if scope in scopes and scope and source_root.exists() else None
         if selected_source_root and selected_source_root.is_dir():
             for path in sorted(path for path in source_markdown
-                               if path.is_relative_to(selected_source_root)):
+                               if path.relative_to(source_root).parts[0] in family):
                 if path.is_symlink() or not path.is_file():
                     continue
                 relative = path.relative_to(omm.root).as_posix()
@@ -221,29 +226,33 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
                                         "bytes": path.stat().st_size,
                                         "file_modified_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()})
             project_sources.sort(key=lambda item: (item["file_modified_at"], item["path"]), reverse=True)
-        scoped_records = [r for r in active if r.scope == scope] if scope else []
+        scoped_records = [r for r in active if r.scope in family] if scope else []
+        selected_handoff = next((h for h in reversed(handoffs)
+                                 if scope and h.get("scope", "default") == scope), None)
+        if scope and selected_handoff is None:
+            historical = [h for h in handoffs if h.get("scope", "default") in family]
+            selected_handoff = max(historical, key=lambda h: h.get("updated_at") or "", default=None)
         organization = {
             "scope": scope,
-            "display_name": profile.get("display_name", scope or "Todos os projetos"),
+            "display_name": catalog.label(scope, profile.get("display_name", scope or "Todos os projetos")),
             "agents": agents,
             "skills": applicable_skills if scope else skills,
             "shared_project_knowledge": shared_knowledge,
             "sources": project_sources,
             "active_memory_count": len(scoped_records),
             "unknown_count": sum(r.kind == "unknown" for r in scoped_records),
-            "handoff": next((h for h in reversed(handoffs)
-                             if scope and h.get("scope", "default") == scope), None),
+            "handoff": selected_handoff,
+            "aliases": catalog.family(scope)[1:] if scope else [],
         }
-        scope_labels = {name: profiles.get(name, {}).get(
-            "display_name", name.replace("-", " ").title())
-            for name in scopes}
+        scope_labels = {name: catalog.label(name, profiles.get(name, {}).get(
+            "display_name", name.replace("-", " ").title())) for name in scopes}
         skill_bytes = sum((omm.root / item["source"]).stat().st_size for item in skills)
         policies = _json_lines(omm.store.policies_path)
-        scoped_handoffs = [h for h in handoffs if not scope or h.get("scope", "default") == scope]
+        scoped_handoffs = [h for h in handoffs if not scope or h.get("scope", "default") in family]
         pending_proposals = omm.proposals(pending_only=True)
         if scope:
             pending_proposals = [item for item in pending_proposals
-                                 if item["record"].get("scope") in {scope, "global"}]
+                                 if item["record"].get("scope") in family | {"global"}]
         return {
             "query": query.strip(),
             "summary": {
@@ -261,6 +270,8 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             },
             "scopes": scopes,
             "scope_labels": scope_labels,
+            "scope_categories": {name: catalog.category(name) for name in scopes},
+            "scope_aliases": catalog.aliases,
             "records": records,
             "open_questions": open_question_items,
             "source_hits": source_hits,
@@ -269,8 +280,8 @@ def dashboard_data(omm: OMM, query: str = "", scope: str = "", show_archived: bo
             "proposal_count": len(pending_proposals),
             "proposal_ids": [item["id"] for item in pending_proposals],
             "organization": organization,
-            "policies": [p for p in policies if not scope or p.get("scope", "default") == scope],
-            "handoff": scoped_handoffs[-1] if scoped_handoffs else None,
+            "policies": [p for p in policies if not scope or p.get("scope", "default") in family],
+            "handoff": selected_handoff if scope else (scoped_handoffs[-1] if scoped_handoffs else None),
             "skills": skills,
             "agents": agents,
         }

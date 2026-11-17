@@ -129,6 +129,7 @@ def parser() -> argparse.ArgumentParser:
     workstream_create.add_argument("--title", required=True, help="nome da frente de trabalho")
     workstream_create.add_argument("--by", default="human", help="quem registrou a frente")
     workstream_create.add_argument("--status", choices=["active", "paused", "completed", "archived"], default="active", help="estado da frente")
+    workstream_create.add_argument("--scope", help="projeto dono da frente; use o identificador canônico")
     workstream_sub.add_parser("list", help="mostrar as frentes de trabalho")
     workstream_show = workstream_sub.add_parser("show", help="ler uma frente e seu SHA atual")
     workstream_show.add_argument("--id", required=True)
@@ -410,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "workstream":
         try:
             if args.workstream_command == "create":
-                result = omm.create_workstream(args.id, args.title, args.by, args.status)
+                result = omm.create_workstream(args.id, args.title, args.by, args.status, args.scope)
             elif args.workstream_command == "show":
                 result = omm.get_workstream(args.id)
             elif args.workstream_command == "update":

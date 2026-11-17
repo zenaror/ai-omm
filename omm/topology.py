@@ -8,6 +8,7 @@ import re
 import tempfile
 
 from .redaction import find_credentials
+from .projects import ProjectCatalog
 
 
 class TopologyError(ValueError):
@@ -24,6 +25,8 @@ def select_topology(root: Path, scope: str | None = None) -> dict:
 
     The caller holds the operation lock. Invalid topology is never a fallback.
     """
+    if scope is not None:
+        scope = ProjectCatalog(root).canonical(scope)
     topology = load_topology(root)
     digest = topology_sha256(root)
     profiles = topology.get("project_profiles", {})
